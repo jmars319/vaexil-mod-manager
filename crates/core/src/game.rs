@@ -188,7 +188,9 @@ mod tests {
         });
         let stores: Vec<Store> = found.iter().map(|g| g.store).collect();
         assert_eq!(stores, [Store::Steam, Store::Epic, Store::Microsoft]);
-        assert_eq!(normalize(&found[0].root), normalize(&steam_game));
+        // Found folders are reported as Windows spells them, which expands
+        // 8.3 short names such as CI's RUNNER~1, so compare against that.
+        assert_eq!(normalize(&found[0].root), normalize(&display_path(steam_game)));
         assert!(!found[0].root.to_string_lossy().starts_with(r"\\?\"));
     }
 
