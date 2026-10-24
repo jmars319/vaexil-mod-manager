@@ -1,0 +1,46 @@
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+# No HTTP or TLS crates. The SMF update check planned for a later stage uses
+# Windows' own WinHTTP through the `windows` crate, as Modlist Launcher plans
+# for its update notice.
+deny = [
+    { crate = "reqwest" },
+    { crate = "hyper" },
+    { crate = "ureq" },
+    { crate = "curl" },
+    { crate = "isahc" },
+    { crate = "openssl" },
+    { crate = "native-tls" },
+    { crate = "rustls" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

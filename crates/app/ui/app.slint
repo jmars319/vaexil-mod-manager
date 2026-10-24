@@ -1,0 +1,314 @@
+// Geist (OFL-1.1, assets/fonts/OFL.txt), embedded so text matches vaexil.tv.
+import "../../../assets/fonts/Geist-Regular.ttf";
+import "../../../assets/fonts/Geist-SemiBold.ttf";
+import "../../../assets/fonts/Geist-Bold.ttf";
+import "../../../assets/fonts/GeistMono-Regular.ttf";
+import { ScrollView } from "std-widgets.slint";
+import { Button, Theme, Message, Messages } from "theme.slint";
+
+export { Message }
+
+export struct ModRow {
+    name: string,
+    detail: string,
+    // 1-based load position, or 0 when the mod is off.
+    position: int,
+    badge: string,
+    problem: string,
+}
+
+export global Ui {
+    in property <string> version;
+    // "mods" or "message"
+    in property <string> screen: "message";
+    in property <string> game-detail;
+    in property <string> chip: "Looking for HITMAN…";
+    in property <bool> chip-warn;
+    in property <string> heading;
+    in property <string> message;
+    in property <string> summary;
+    in property <[ModRow]> mods;
+    in property <[Message]> notes;
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> warn;
+    height: 28px;
+    min-width: label.preferred-width + 24px;
+    horizontal-stretch: 0;
+    border-radius: self.height / 2;
+    background: (warn ? Theme.warning : Theme.ready).transparentize(86%);
+    border-width: 1px;
+    border-color: (warn ? Theme.warning : Theme.ready).transparentize(50%);
+    label := Text {
+        text: root.text;
+        font-size: 12px;
+        font-weight: 600;
+        color: root.warn ? Theme.warning : Theme.ready;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component ModRowView inherits Rectangle {
+    in property <ModRow> item;
+    min-height: content.preferred-height;
+    border-radius: 12px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.surface-border;
+    accessible-role: list-item;
+    accessible-label: root.item.name + ", " + (root.item.position > 0 ? "load position " + root.item.position : "off")
+        + (root.item.detail != "" ? ", " + root.item.detail : "")
+        + (root.item.problem != "" ? ". Problem: " + root.item.problem : "");
+
+    content := HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 24px;
+                border-radius: 12px;
+                background: root.item.position > 0 ? Theme.accent.transparentize(84%) : transparent;
+                border-width: root.item.position > 0 ? 0px : 1px;
+                border-color: Theme.surface-border;
+                Text {
+                    text: root.item.position > 0 ? root.item.position : "Off";
+                    font-size: 12px;
+                    font-weight: 600;
+                    font-family: root.item.position > 0 ? Theme.font-mono : Theme.font-sans;
+                    color: root.item.position > 0 ? Theme.accent : Theme.secondary-text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.item.name;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                overflow: elide;
+                accessible-role: none;
+            }
+            if root.item.detail != "": Text {
+                text: root.item.detail;
+                font-size: 12px;
+                color: Theme.secondary-text;
+                overflow: elide;
+                accessible-role: none;
+            }
+            if root.item.problem != "": Text {
+                text: root.item.problem;
+                font-size: 12px;
+                color: Theme.danger;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+        }
+        if root.item.badge != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 22px;
+                width: badge-text.preferred-width + 16px;
+                border-radius: 11px;
+                border-width: 1px;
+                border-color: Theme.surface-border;
+                badge-text := Text {
+                    text: root.item.badge;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: Theme.secondary-text;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Vaexil Mod Manager";
+    icon: @image-url("../../../assets/icon-256.png");
+    preferred-width: 980px;
+    preferred-height: 720px;
+    min-width: 420px;
+    min-height: 480px;
+    background: Theme.window-background;
+    default-font-size: 13px;
+    default-font-family: Theme.font-sans;
+
+    property <length> gutter: 24px;
+
+    // After a restore from minimized, the software renderer's partial repaint
+    // left everything outside changed items unpainted. Flipping this flag
+    // (from Rust) changes the full-window rectangle's colour by one step,
+    // which marks the whole window dirty and repaints all of it.
+    in property <bool> repaint-flip;
+    Rectangle {
+        background: root.repaint-flip ? Theme.window-background-alt : Theme.window-background;
+        accessible-role: none;
+    }
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: gutter;
+            padding-top: 22px;
+            padding-bottom: 14px;
+            spacing: 16px;
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "HITMAN World of Assassination";
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                if Ui.game-detail != "": Text {
+                    text: Ui.game-detail;
+                    font-size: 12px;
+                    color: Theme.secondary-text;
+                    overflow: elide;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Chip {
+                    text: Ui.chip;
+                    warn: Ui.chip-warn;
+                }
+            }
+        }
+
+        if Ui.notes.length > 0: HorizontalLayout {
+            padding-left: gutter;
+            padding-right: gutter;
+            padding-bottom: 12px;
+            Messages { items: Ui.notes; }
+        }
+
+        if Ui.screen == "mods": VerticalLayout {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 10px;
+                Text {
+                    text: "Mods";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: Ui.summary;
+                    color: Theme.secondary-text;
+                    vertical-alignment: center;
+                }
+            }
+            list := ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    width: list.visible-width;
+                    // Rows keep their own height when there are only a few.
+                    alignment: start;
+                    padding-left: gutter;
+                    padding-right: gutter;
+                    padding-bottom: gutter;
+                    spacing: 8px;
+                    for m in Ui.mods: ModRowView { item: m; }
+                }
+            }
+        }
+
+        if Ui.screen == "message": VerticalLayout {
+            vertical-stretch: 1;
+            padding: gutter * 2;
+            alignment: center;
+            spacing: 12px;
+            Text {
+                text: Ui.heading;
+                font-size: 22px;
+                font-weight: 700;
+                color: Theme.text;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Text {
+                text: Ui.message;
+                color: Theme.secondary-text;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: gutter;
+            padding-right: gutter;
+            padding-top: 8px;
+            padding-bottom: 12px;
+            Text {
+                text: "Read-only for now: Vaexil Mod Manager has not changed any file. Version " + Ui.version + ".";
+                font-size: 11px;
+                color: Theme.secondary-text;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+/// A plain message for errors before the main window exists.
+export component MessageWindow inherits Window {
+    in property <string> heading;
+    in property <string> message;
+    callback ok();
+
+    title: "Vaexil Mod Manager";
+    icon: @image-url("../../../assets/icon-256.png");
+    width: 440px;
+    background: Theme.surface;
+    default-font-size: 13px;
+    default-font-family: Theme.font-sans;
+    forward-focus: ok-button;
+
+    VerticalLayout {
+        padding: 22px;
+        spacing: 12px;
+        Text {
+            text: root.heading;
+            font-size: 18px;
+            font-weight: 700;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.message;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: end;
+            ok-button := Button {
+                text: "OK";
+                primary: true;
+                clicked => { root.ok(); }
+            }
+        }
+    }
+}
