@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in Vaexil Mod Manager does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If the problem could harm someone's game, mods or PC, report it privately instead: **Security > Report a vulnerability**.
+
+        If the problem is in Simple Mod Framework itself, for example a deploy that fails the same way in SMF's own Mod Manager, report it to [SMF's authors](https://github.com/atampy25/simple-mod-framework) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. A screenshot of the window helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Install the mod...
+        2. Open Vaexil Mod Manager...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Vaexil Mod Manager version
+      description: Shown at the bottom of the window.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: store
+    attributes:
+      label: Where HITMAN is installed from
+      options:
+        - Steam
+        - Epic Games
+        - Microsoft Store
+        - Not found by the app
+    validations:
+      required: true
+  - type: input
+    id: smf-version
+    attributes:
+      label: SMF version
+      description: The chip at the top right of the window, such as "SMF 2.33.42" or "SMF unknown version (…)".
+      placeholder: SMF 2.33.42
+  - type: input
+    id: setup
+    attributes:
+      label: Windows version and number of mods
+      placeholder: Windows 11 24H2, 15 mods
+  - type: textarea
+    id: mod
+    attributes:
+      label: The mod involved, if any
+      description: Its name and version, and where you got it. If its manifest.json is part of the problem, paste it here.
+      render: json
