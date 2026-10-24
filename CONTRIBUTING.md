@@ -23,9 +23,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release -p vaexil-mod-manager
 ./scripts/smoke-minimize-restore.ps1
+./scripts/smoke-mouse-clicks.ps1
 ```
 
-CI runs all of these on every pull request except the smoke test, plus `cargo deny check`. `cargo deny` bans HTTP and TLS crates and rejects yanked or vulnerable ones. Both CI checks must pass before a pull request can merge.
+CI runs all of these on every pull request, plus `cargo deny check`. Test clicks with the mouse, not only with UI Automation's Invoke, which skips the mouse path. `cargo deny` bans HTTP and TLS crates and rejects yanked or vulnerable ones. Both CI checks must pass before a pull request can merge.
 
 - Keep each pull request to one change.
 - Add tests for behaviour that can be tested. Platform-neutral logic belongs in `crates/core`, where it is unit tested.

@@ -49,6 +49,16 @@ jobs:
           $exe = Get-Item target/release/vaexil-mod-manager.exe
           "vaexil-mod-manager.exe: {0:N1} MB" -f ($exe.Length / 1MB) | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
+      # The smoke tests drive the release build's real window against a
+      # throwaway fake game folder, as Modlist Launcher's CI does.
+      - name: Smoke test, repaint after minimize and restore
+        shell: pwsh
+        run: ./scripts/smoke-minimize-restore.ps1
+
+      - name: Smoke test, real mouse clicks
+        shell: pwsh
+        run: ./scripts/smoke-mouse-clicks.ps1
+
   security:
     name: Dependency policy
     runs-on: ubuntu-latest
