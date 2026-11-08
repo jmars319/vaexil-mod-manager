@@ -36,6 +36,8 @@ To check that the window repaints after minimize/restore and maximize/restore, r
 ./scripts/smoke-minimize-restore.ps1
 ```
 
+`scripts/package.ps1` builds the portable zip and, when Inno Setup 6 is installed, the per-user installer into `dist/`. Releases: a `v*` tag builds those into a draft GitHub release. Publishing the draft also copies the installer to [jamarq-releases](https://github.com/JAMARQ-Digital-LLC/jamarq-releases) as `vaexil-mod-manager-<version>-x64-setup.exe`, where `vaexil-mod-manager-latest/release.json` names the newest one and its SHA-256 (`.github/workflows/publish-feed.yml`).
+
 ## Safety
 
 [docs/safety-model.md](docs/safety-model.md) lists every file the app reads. It writes none.
