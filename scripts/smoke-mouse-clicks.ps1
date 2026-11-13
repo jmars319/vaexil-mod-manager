@@ -21,7 +21,7 @@
 #   ./scripts/smoke-mouse-clicks.ps1 [-Exe target\release\vaexil-mod-manager.exe]
 param([string] $Exe = (Join-Path $PSScriptRoot '..\target\release\vaexil-mod-manager.exe'))
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName System.Drawing, UIAutomationClient, UIAutomationTypes
 Add-Type @"
 using System; using System.Runtime.InteropServices;
 public static class SmokeClicks {
@@ -30,6 +30,9 @@ public static class SmokeClicks {
   [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool r);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
 }
 "@
 [SmokeClicks]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null
@@ -73,8 +76,28 @@ function Click($window, $control) {
 }
 
 $failed = $false
+# A failed check saves a picture of the window (only this window, through
+# PrintWindow, never the screen) for CI to upload.
+$shots = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'smoke' } else { Join-Path ([IO.Path]::GetTempPath()) "vaexil-mm-clicks-$PID" }
+$script:shotWindow = $null
+function Save-Shot($label) {
+    if (-not $script:shotWindow) { return }
+    try {
+        $h = [IntPtr]$script:shotWindow.Current.NativeWindowHandle
+        $r = New-Object SmokeClicks+RECT
+        [SmokeClicks]::GetWindowRect($h, [ref]$r) | Out-Null
+        $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
+        $g = [System.Drawing.Graphics]::FromImage($bmp); $hdc = $g.GetHdc()
+        [SmokeClicks]::PrintWindow($h, $hdc, 2) | Out-Null
+        $g.ReleaseHdc($hdc); $g.Dispose()
+        New-Item -ItemType Directory -Force $shots | Out-Null
+        $name = ($label -replace '[^A-Za-z0-9]+', '-').Trim('-')
+        $bmp.Save((Join-Path $shots "fail-$name.png")); $bmp.Dispose()
+    } catch { "  (no screenshot: $_)" }
+}
+
 function Check($label, [bool] $ok) {
-    if (-not $ok) { $script:failed = $true }
+    if (-not $ok) { $script:failed = $true; Save-Shot $label }
     '{0,-46} {1}' -f $label, $(if ($ok) { 'ok' } else { 'FAIL' })
 }
 
@@ -284,10 +307,13 @@ try {
     # The test leaves the confirmation by Close, far from "Add to PATH", not
     # by the Cancel button beside it, and checks the user PATH is unchanged.
     $pathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $script:shotWindow = $window
     Click $window (Find-Control $window 'Settings')
+    Start-Sleep -Milliseconds 800
     $add = Find-Control $window 'Add the command line to my PATH'
     if ($add) {
         Click $window $add
+        Start-Sleep -Milliseconds 600
         Check 'settings: Add first shows what it will change' ([bool](Find-Control $window 'Add to PATH'))
         Click $window (Find-Control $window 'Close settings')
         Start-Sleep -Milliseconds 500

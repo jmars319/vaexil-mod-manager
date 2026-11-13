@@ -87,6 +87,16 @@ jobs:
         shell: pwsh
         run: ./scripts/smoke-mouse-clicks.ps1
 
+      # A failed click check saves a picture of the app's window.
+      - name: Upload smoke screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-screenshots
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
   security:
     name: Dependency policy
     runs-on: ubuntu-latest
