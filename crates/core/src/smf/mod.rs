@@ -1,7 +1,7 @@
 //! Simple Mod Framework, read through the files SMF documents for its users:
 //! `config.json`, the `Mods` folder and each mod's `manifest.json`. The only
 //! writes, to `config.json` (a mod on or off, a mod's options), live in
-//! [`write`]. Nothing here runs SMF.
+//! [`write`](mod@write). Nothing here runs SMF.
 
 mod kind;
 pub mod options;
