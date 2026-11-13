@@ -14,9 +14,11 @@ pub mod deploy;
 pub mod diagnose;
 pub mod events;
 pub mod host;
+pub mod http;
 pub mod journal;
 pub mod settings;
 pub mod setups;
+pub mod smf_update;
 pub mod steam_play;
 pub mod store;
 
@@ -144,7 +146,9 @@ impl Engine {
 
     pub fn with_data_dir(data_dir: Option<PathBuf>) -> Engine {
         let backend: Box<dyn Backend> = match &data_dir {
-            Some(dir) => Box::new(Smf::with_backups(dir.join("config-backups"))),
+            Some(dir) => {
+                Box::new(Smf::with_backups(dir.join("config-backups")).with_learned(dir.join(smf_update::LEARNED)))
+            }
             None => Box::new(Smf::default()),
         };
         let settings = match &data_dir {
@@ -450,11 +454,37 @@ impl Engine {
         let r = match self.blocker() {
             Some(why) => Err(why),
             None => {
+                self.set_aside_stale_thumbs(game);
                 deploy::start(&self.progress, game.clone(), self.logs_dir(), then_play);
                 Ok(())
             }
         };
         self.noted("deploy.started", Some(game), None, r, |()| Some("Started a deploy.".into()))
+    }
+
+    /// Before a deploy: if SMF's `cleanThumbs.dat` is from an older game build
+    /// than the game's own thumbs.dat (after a game update), keep a copy and
+    /// remove it, so SMF copies the current one again, as it does when the
+    /// file is missing. Returns what was done, if anything.
+    pub fn set_aside_stale_thumbs(&self, game: &GameInstall) -> Option<String> {
+        let folder = vmm_backend_smf::find_folder(&game.root)?;
+        let stale = vmm_backend_smf::thumbs::stale(&folder, &game.root)?;
+        let data = self.data_dir()?;
+        let clean = folder.join("cleanThumbs.dat");
+        let backup = data.join("smf-backups").join(format!("cleanThumbs-{}-{:015}.dat", stale.clean, deploy::now_ms()));
+        let r = std::fs::create_dir_all(backup.parent()?)
+            .and_then(|()| std::fs::copy(&clean, &backup))
+            .and_then(|_| std::fs::remove_file(&clean))
+            .map_err(|e| {
+                VmmError::new(ErrorCode::SaveFailed, format!("Couldn't set aside the stale cleanThumbs.dat: {e}"))
+            });
+        let message = format!(
+            "SMF's cleanThumbs.dat was for game build {} and the game is now build {}, so it was set aside (copy in {});              SMF copies the current one again.",
+            stale.clean,
+            stale.game,
+            backup.display()
+        );
+        self.noted("smf.clean_thumbs", Some(game), None, r, |()| Some(message.clone())).ok().map(|()| message)
     }
 
     /// Whether a deploy is running, and its latest output line.

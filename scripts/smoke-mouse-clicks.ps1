@@ -356,7 +356,9 @@ try {
     $script:shotWindow = $window
     Click $window (Find-Control $window 'Settings')
     Start-Sleep -Milliseconds 800
-    $add = Find-Control $window 'Add the command line to my PATH'
+    # The stand-in SMF isn't a release this app can name, so it offers no update.
+    Check 'settings: SMF updates need a named release' ([bool](Find-Control $window 'The installed SMF isn''t a release this app can name, so it can''t be updated from here.'))
+    $add = Scroll-To $window 'Add the command line to my PATH'
     if ($add) {
         Click $window $add
         Start-Sleep -Milliseconds 600
@@ -365,13 +367,13 @@ try {
         Start-Sleep -Milliseconds 500
         Click $window (Find-Control $window 'Settings')
         Start-Sleep -Milliseconds 500
-        Check 'settings: leaving without confirming changes nothing' ([bool](Find-Control $window 'Add the command line to my PATH') -and [Environment]::GetEnvironmentVariable('Path', 'User') -eq $pathBefore)
+        Check 'settings: leaving without confirming changes nothing' ([bool](Scroll-To $window 'Add the command line to my PATH') -and [Environment]::GetEnvironmentVariable('Path', 'User') -eq $pathBefore)
     } else {
-        Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Find-Control $window 'Take the command line out of my PATH'))
+        Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Scroll-To $window 'Take the command line out of my PATH'))
     }
     # Steam's Play button reads the stand-in Steam, which has no account, so
     # it says so and offers no button.
-    Check 'settings: Steam''s Play button finds no account in the stand-in' ([bool](Find-Control $window 'No Steam account has signed in on this PC, so there are no settings to change.'))
+    Check 'settings: Steam''s Play button finds no account in the stand-in' ([bool](Scroll-To $window 'No Steam account has signed in on this PC, so there are no settings to change.'))
     # "Let AI tools make changes" is off until switched on, and is kept in
     # the app's settings.json (here the test's throwaway data folder).
     $settingsFile = Join-Path $data 'settings.json'

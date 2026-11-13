@@ -34,9 +34,8 @@ allow = [
 multiple-versions = "allow"
 wildcards = "deny"
 allow-wildcard-paths = true
-# No HTTP or TLS crates. The SMF update check planned for a later stage uses
-# Windows' own WinHTTP through the `windows` crate, as Modlist Launcher plans
-# for its update notice.
+# No HTTP or TLS crates. SMF's update check and download (E7) use Windows'
+# own WinHTTP through the `windows` crate (crates/engine/src/http.rs).
 deny = [
     { crate = "reqwest" },
     { crate = "hyper" },

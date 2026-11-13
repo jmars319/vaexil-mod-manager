@@ -621,6 +621,34 @@ pub struct PlayResult {
     pub report: Option<DeployReport>,
 }
 
+/// Whether a newer SMF is out, from the last check of SMF's GitHub releases.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SmfUpdateStatus {
+    pub schema_version: u32,
+    /// The installed version, when it is one this app can name.
+    pub installed: Option<String>,
+    /// The newest newer release, if any.
+    pub latest: Option<String>,
+    /// Whether a newer release says it can't be applied automatically.
+    pub held: bool,
+    /// The download's size in bytes.
+    pub size_bytes: u64,
+    /// When SMF's releases were last checked; absent when never.
+    pub checked_at_ms: Option<u64>,
+}
+
+/// `vmm smf update`: what happened.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SmfUpdateResult {
+    pub schema_version: u32,
+    pub updated: bool,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub message: String,
+}
+
 /// `vmm deploy-report`: the last deploy, or none yet.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -680,6 +708,8 @@ pub fn all() -> Vec<(&'static str, schemars::Schema)> {
         ("setup-list", schemars::schema_for!(SetupList)),
         ("deploy-status", schemars::schema_for!(DeployStatus)),
         ("play-result", schemars::schema_for!(PlayResult)),
+        ("smf-update-status", schemars::schema_for!(SmfUpdateStatus)),
+        ("smf-update-result", schemars::schema_for!(SmfUpdateResult)),
         ("diagnosis", schemars::schema_for!(Diagnosis)),
     ]
 }

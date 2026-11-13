@@ -67,6 +67,10 @@ Changing (plan first, then apply the plan):
   vmm apply <plan-id> --yes     apply a plan, once, within 10 minutes
   vmm deploy --yes              run SMF's Deploy.exe and wait for it, then
                                 show its report (refused while the game runs)
+  vmm smf check                 ask SMF's GitHub releases whether a newer SMF is out
+  vmm smf update --yes          download it, check it against GitHub's checksum, and
+                                install it the way SMF's own updater does, keeping
+                                your mods, settings and a copy of each replaced file
   vmm play                      start HITMAN when the game has your mods; with
                                 changes since the last deploy, choose:
   vmm play --deploy --yes       deploy first, then start it
@@ -303,6 +307,61 @@ fn run(args: Args) -> Result<Out, VmmError> {
             let game = e.pick_game(args.game.as_deref()).ok();
             let list = e.setup_list(game.as_ref())?;
             Ok(out(&list, setups_text(&list)))
+        }
+        ["smf", "check"] => {
+            let e = engine();
+            let game = e.pick_game(args.game.as_deref())?;
+            e.check_smf_update(&game)?;
+            let s = e.smf_update_status(Some(&game));
+            let text = match (&s.latest, s.held) {
+                (Some(t), false) => format!(
+                    "SMF {t} is available (installed {}). Run `vmm smf update --yes`.\n",
+                    s.installed.clone().unwrap_or_default()
+                ),
+                (Some(t), true) => {
+                    format!("SMF {t} is available, but its notes say it can't be applied automatically.\n")
+                }
+                (None, _) => format!("SMF {} is the newest.\n", s.installed.clone().unwrap_or_default()),
+            };
+            Ok(out(&s, text))
+        }
+        ["smf", "update"] => {
+            if !args.yes {
+                return Err(usage(
+                    "Updating replaces SMF's program files (your mods and settings stay). Run `vmm smf update --yes` \
+                     to confirm. Nothing was changed.",
+                ));
+            }
+            let e = engine();
+            let game = e.pick_game(args.game.as_deref())?;
+            let from = e.smf_version(&game);
+            let Some(job) = e.prepare_smf_update(&game)? else {
+                let message = format!("SMF {} is the newest; nothing to do.", from.clone().unwrap_or_default());
+                let r = schema::SmfUpdateResult {
+                    schema_version: SCHEMA_VERSION,
+                    updated: false,
+                    to: from.clone(),
+                    from,
+                    message: message.clone(),
+                };
+                return Ok(out(&r, message + "\n"));
+            };
+            let show = !args.json;
+            let r = vmm_engine::smf_update::run(&job, &mut |line| {
+                if show {
+                    eprintln!("{line}");
+                }
+            });
+            e.note_smf_update(&game, &r);
+            let message = r?;
+            let result = schema::SmfUpdateResult {
+                schema_version: SCHEMA_VERSION,
+                updated: true,
+                from,
+                to: Some(job.release.tag.clone()),
+                message: message.clone(),
+            };
+            Ok(out(&result, message + "\n"))
         }
         ["play"] => {
             let e = engine();

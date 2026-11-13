@@ -10,6 +10,8 @@ mod kind;
 pub mod options;
 mod releases;
 pub mod report;
+pub mod thumbs;
+pub mod update;
 pub mod write;
 
 use std::cell::RefCell;
@@ -41,6 +43,9 @@ pub struct Smf {
     /// Where a copy of `config.json` goes before each write. `None` keeps no
     /// copy, which only tests use.
     backup_dir: Option<PathBuf>,
+    /// A JSON map of `Deploy.exe` SHA-256 to version, for releases this app
+    /// installed itself and the built-in table doesn't list.
+    learned: Option<PathBuf>,
 }
 
 type VersionKey = (PathBuf, u64, Option<SystemTime>);
@@ -48,6 +53,18 @@ type VersionKey = (PathBuf, u64, Option<SystemTime>);
 impl Smf {
     pub fn with_backups(backup_dir: PathBuf) -> Self {
         Smf { backup_dir: Some(backup_dir), ..Smf::default() }
+    }
+
+    /// Also names versions listed in `file` (see the field).
+    pub fn with_learned(mut self, file: PathBuf) -> Self {
+        self.learned = Some(file);
+        self
+    }
+
+    fn learned_version(&self, sha256: &str) -> Option<String> {
+        let text = std::fs::read(self.learned.as_ref()?).ok()?;
+        let map: BTreeMap<String, String> = serde_json::from_slice(&text).ok()?;
+        map.get(&sha256.to_lowercase()).cloned()
     }
 
     fn version(&self, deploy_exe: &Path) -> Result<Version, String> {
@@ -59,7 +76,13 @@ impl Smf {
         {
             return Ok(version.clone());
         }
-        let version = detect_version(deploy_exe)?;
+        let version = match detect_version(deploy_exe)? {
+            Version::Unknown { sha256 } => match self.learned_version(&sha256) {
+                Some(v) => Version::Known(v),
+                None => Version::Unknown { sha256 },
+            },
+            known => known,
+        };
         *self.version_cache.borrow_mut() = Some((key, version.clone()));
         Ok(version)
     }
@@ -349,7 +372,7 @@ pub fn detect_version(deploy_exe: &Path) -> Result<Version, String> {
     })
 }
 
-fn sha256_file(path: &Path) -> std::io::Result<String> {
+pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 1 << 16];

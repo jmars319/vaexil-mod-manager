@@ -40,9 +40,37 @@ fn show_steam(ui: &AppWindow, state: &State) {
     ss.set_steam_problem(v.problem.unwrap_or_default().into());
 }
 
+/// SMF's version and the last update check, into the sheet.
+fn show_smf(ui: &AppWindow, state: &State) {
+    let ss = ui.global::<SettingsState>();
+    let game = state.game.borrow().clone();
+    let s = state.engine.smf_update_status(game.as_ref());
+    let installed = s.installed.clone();
+    let checked = s.checked_at_ms.map(|t| format!(" Checked {} UTC.", vmm_engine::events::timestamp(t)));
+    let text = match (&installed, &s.latest, s.held) {
+        (None, _, _) => {
+            "The installed SMF isn't a release this app can name, so it can't be updated from here.".to_string()
+        }
+        (Some(i), Some(l), false) => {
+            format!("Installed: {i}. SMF {l} is available ({} MB).{}", s.size_bytes >> 20, checked.unwrap_or_default())
+        }
+        (Some(i), Some(l), true) => format!(
+            "Installed: {i}. SMF {l} is out, but its notes say it can't be applied automatically; update it by hand.{}",
+            checked.unwrap_or_default()
+        ),
+        (Some(i), None, _) => match checked {
+            Some(c) => format!("Installed: {i}, the newest.{c}"),
+            None => format!("Installed: {i}. Not checked yet."),
+        },
+    };
+    ss.set_smf_status(text.into());
+    ss.set_smf_can_update(installed.is_some() && s.latest.is_some() && !s.held);
+}
+
 fn show(ui: &AppWindow, state: &State) {
     let ss = ui.global::<SettingsState>();
     show_steam(ui, state);
+    show_smf(ui, state);
     ss.set_ai_changes(state.engine.ai_changes_allowed());
     let exe = cli_path::cli_exe();
     let [claude, gemini, codex] = exe.as_deref().map(connect_commands).unwrap_or_default();
@@ -198,6 +226,7 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
             ss.on_steam_disconnect(handler);
         }
     }
+    wire_smf(ui, state);
     {
         let weak = ui.as_weak();
         ss.on_cancel_add(move || {
@@ -213,6 +242,158 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
                 ui.global::<SettingsState>().set_confirming(false);
                 ui.global::<Ui>().set_sheet("".into());
             }
+        });
+    }
+}
+
+type Slot<T> = std::sync::Arc<std::sync::Mutex<Option<T>>>;
+
+/// Runs `work` on a worker thread and hands its result to `done` on the
+/// window's thread, polling every 300 ms; `line` shows progress meanwhile.
+fn in_background<T: Send + 'static>(
+    ui: &AppWindow,
+    work: impl FnOnce(&dyn Fn(String)) -> T + Send + 'static,
+    done: impl Fn(&AppWindow, T) + 'static,
+) {
+    let result: Slot<T> = Default::default();
+    let line: std::sync::Arc<std::sync::Mutex<String>> = Default::default();
+    {
+        let (result, line) = (result.clone(), line.clone());
+        std::thread::spawn(move || {
+            let r = work(&|l| *line.lock().expect("progress lock") = l);
+            *result.lock().expect("result lock") = Some(r);
+        });
+    }
+    let timer = Rc::new(slint::Timer::default());
+    let keep = timer.clone();
+    let weak = ui.as_weak();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(300), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let progress = line.lock().expect("progress lock").clone();
+        if !progress.is_empty() {
+            ui.global::<SettingsState>().set_smf_note(progress.into());
+        }
+        if let Some(r) = result.lock().expect("result lock").take() {
+            keep.stop();
+            done(&ui, r);
+        }
+    });
+}
+
+fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
+    let ss = ui.global::<SettingsState>();
+    let note = |ui: &AppWindow, text: String, error: bool| {
+        let ss = ui.global::<SettingsState>();
+        ss.set_smf_note(text.into());
+        ss.set_smf_note_error(error);
+    };
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        ss.on_smf_check(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(game) = state.game.borrow().clone() else { return };
+            let (Some(data), Some(installed)) =
+                (state.engine.data_dir().map(|d| d.to_path_buf()), state.engine.smf_version(&game))
+            else {
+                note(
+                    &ui,
+                    "The installed SMF isn't a release this app can name, so there is nothing to compare.".into(),
+                    true,
+                );
+                return;
+            };
+            ui.global::<SettingsState>().set_smf_busy(true);
+            note(&ui, "Checking SMF's releases on GitHub…".into(), false);
+            let state = state.clone();
+            in_background(
+                &ui,
+                move |_| vmm_engine::smf_update::check(&data, &installed).map(|_| ()),
+                move |ui, r| {
+                    ui.global::<SettingsState>().set_smf_busy(false);
+                    show_smf(ui, &state);
+                    match r {
+                        Ok(()) => note(ui, String::new(), false),
+                        Err(e) => note(ui, e.message, true),
+                    }
+                },
+            );
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ss.on_smf_update(move || {
+            if let Some(ui) = weak.upgrade() {
+                let ss = ui.global::<SettingsState>();
+                ss.set_smf_note("".into());
+                ss.set_smf_confirming(true);
+            }
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ss.on_smf_cancel(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<SettingsState>().set_smf_confirming(false);
+            }
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        ss.on_smf_confirm(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let ss = ui.global::<SettingsState>();
+            ss.set_smf_confirming(false);
+            let Some(game) = state.game.borrow().clone() else { return };
+            let job = match state.engine.prepare_smf_update(&game) {
+                Ok(Some(job)) => job,
+                Ok(None) => {
+                    show_smf(&ui, &state);
+                    note(&ui, "SMF is already the newest.".into(), false);
+                    return;
+                }
+                Err(e) => {
+                    note(&ui, e.message, true);
+                    return;
+                }
+            };
+            ss.set_smf_busy(true);
+            let state = state.clone();
+            in_background(
+                &ui,
+                move |line| vmm_engine::smf_update::run(&job, &mut |l| line(l)),
+                move |ui, r| {
+                    ui.global::<SettingsState>().set_smf_busy(false);
+                    if let Some(game) = state.game.borrow().clone() {
+                        state.engine.note_smf_update(&game, &r);
+                    }
+                    show_smf(ui, &state);
+                    match r {
+                        Ok(m) => note(ui, m, false),
+                        Err(e) => note(ui, e.message, true),
+                    }
+                },
+            );
+        });
+    }
+}
+
+/// Checks SMF's releases in the background when the last check is over a
+/// day old, so Settings and the main window can say an update is out.
+pub fn daily_smf_check(state: &State) {
+    let Some(game) = state.game.borrow().clone() else { return };
+    let (Some(data), Some(installed)) =
+        (state.engine.data_dir().map(|d| d.to_path_buf()), state.engine.smf_version(&game))
+    else {
+        return;
+    };
+    let due = vmm_engine::smf_update::last_check(&data).is_none_or(|l| {
+        l.installed != installed
+            || vmm_engine::deploy::now_ms().saturating_sub(l.checked_at_ms) > vmm_engine::smf_update::CHECK_EVERY_MS
+    });
+    // Tests and development runs (a stand-in game) never go online by themselves.
+    if due && vmm_engine::host::game_override().is_none() {
+        std::thread::spawn(move || {
+            let _ = vmm_engine::smf_update::check(&data, &installed);
         });
     }
 }

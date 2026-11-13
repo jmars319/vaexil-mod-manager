@@ -147,6 +147,18 @@ impl Engine {
             for n in &inspection.notes {
                 problems.push(problem("backend.note", None, n.clone()));
             }
+            if let Some(stale) =
+                vmm_backend_smf::find_folder(&g.root).and_then(|f| vmm_backend_smf::thumbs::stale(&f, &g.root))
+            {
+                problems.push(problem(
+                    "smf.clean_thumbs_stale",
+                    None,
+                    format!(
+                        "SMF's cleanThumbs.dat is for game build {}, the game is build {}; the next deploy sets it aside.",
+                        stale.clean, stale.game
+                    ),
+                ));
+            }
         } else {
             problems.push(problem("game.not_found", None, "No install of the game was found.".into()));
         }

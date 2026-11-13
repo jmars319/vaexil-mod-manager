@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use vmm_core::error::VmmError;
 use vmm_core::schema::{
     ApplyReport, Change, DeployStatus, Diagnosis, ErrorCodeList, ErrorReport, GameList, LastDeploy, LogList, ModDetail,
-    ModList, OrderReport, Plan, SCHEMA_VERSION, SetupList, StatusReport,
+    ModList, OrderReport, Plan, SCHEMA_VERSION, SetupList, SmfUpdateStatus, StatusReport,
 };
 use vmm_engine::Engine;
 use vmm_engine::journal::Caller;
@@ -244,6 +244,18 @@ impl Vmm {
             Err(_) => None,
         };
         result(Ok::<_, VmmError>(e.diagnose(game.as_ref())))
+    }
+
+    #[tool(
+        description = "Whether a newer SMF is out, from the last time the user checked (in Vaexil Mod Manager or \
+                       `vmm smf check`). Makes no network call; updating SMF is the user's to do.",
+        output_schema = schema_for_output::<SmfUpdateStatus>(),
+        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn get_smf_update(&self, Parameters(a): Parameters<GameArgs>) -> Result<CallToolResult, McpError> {
+        let (e, folder) = engine_for(&a.game);
+        let game = e.pick_game(folder.as_deref()).ok();
+        result(Ok::<_, VmmError>(e.smf_update_status(game.as_ref())))
     }
 
     #[tool(

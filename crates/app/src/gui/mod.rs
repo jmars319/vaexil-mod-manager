@@ -70,6 +70,7 @@ pub fn run() -> i32 {
     wire::wire_setups(&ui, &state);
     wire::wire_pass(&ui, &state);
     settings::wire_settings(&ui, &state);
+    settings::daily_smf_check(&state);
     report::wire_report(&ui, &state);
     refresh(&ui, &state);
 
@@ -454,9 +455,17 @@ fn refresh(ui: &AppWindow, state: &State) {
         .settings_problem()
         .filter(|_| state.engine.data_dir().is_some())
         .map(|text| Message { text: text.into(), error: false });
+    // A newer SMF, from the last check.
+    let smf_update = state.game.borrow().as_ref().and_then(|g| {
+        let s = state.engine.smf_update_status(Some(g));
+        s.latest
+            .filter(|_| !s.held)
+            .map(|t| Message { text: format!("SMF {t} is available. Update it from Settings.").into(), error: false })
+    });
     let notes = error
         .into_iter()
         .chain(settings_error)
+        .chain(smf_update)
         .chain(v.notes.into_iter().map(|n| Message { text: SharedString::from(n), error: false }));
     sync(&state.notes, notes.collect());
 }
