@@ -16,9 +16,10 @@ Early development, nothing released yet. It can now:
 - **Find SMF** in a folder inside the game folder and identify which official release it is.
 - **List your SMF mods** grouped by what they change (Gameplay, Models & Textures, Sound, Dialogue, UI, Text, Other), with each mod's load position, version, authors and any problem reading it. An id in the load order that no mod answers to gets its own row, so it can be turned off. The grouping is worked out from each mod's files and is information only.
 - **Turn mods on and off** with a switch. This changes the load order in SMF's `config.json` exactly as SMF's own Mod Manager does, after keeping a copy of the old file. The change reaches the game at the next deploy, which is still done in SMF. Everything it writes is listed in the [safety model](docs/safety-model.md).
+- **Set the load order** in the Load order view: drag a row or use Up and Down, or Auto-sort by the mods' own `loadBefore`/`loadAfter` rules. Broken rules, and mods whose files replace another's, are shown on both views. Nothing is saved until Save.
 - **Change a mod's options and type** in its edit sheet. Options are saved to SMF's `config.json` as SMF's own Mod Manager saves them, after keeping a copy. The type only regroups the Mods view and is kept in the app's own `settings.json`.
 
-The load order view, setups, deploying and starting the game, and keeping SMF up to date come in later stages on the plan page.
+Setups, deploying and starting the game, and keeping SMF up to date come in later stages on the plan page.
 
 ## Build from source
 

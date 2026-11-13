@@ -6,8 +6,9 @@ import "../../../assets/fonts/GeistMono-Regular.ttf";
 import { ScrollView } from "std-widgets.slint";
 import { Button, Switch, Theme, Message, Messages } from "theme.slint";
 import { EditSheet, EditState, OptCheck, OptSelect } from "sheet.slint";
+import { OrderList, OrderRowData, OrderState } from "order.slint";
 
-export { Message, EditState, OptCheck, OptSelect }
+export { Message, EditState, OptCheck, OptSelect, OrderRowData, OrderState }
 
 export struct ModRow {
     // Set on a group heading row; the other fields are then empty.
@@ -22,6 +23,8 @@ export struct ModRow {
     problem: string,
     can-toggle: bool,
     can-edit: bool,
+    // Load-order warnings: broken rules and overridden files.
+    notice: string,
 }
 
 export global Ui {
@@ -38,6 +41,18 @@ export global Ui {
     in property <[Message]> notes;
     // "edit" while the edit sheet is open, otherwise empty.
     in property <string> sheet;
+    // "mods" or "order": which of the two views is showing.
+    in-out property <string> view: "mods";
+    in property <[OrderRowData]> order-rows;
+    in property <string> order-summary;
+    in property <bool> order-dirty;
+    in property <string> order-note;
+    in property <bool> order-note-error;
+    callback show-order(show: bool);
+    callback move-mod(index: int, delta: int);
+    callback auto-sort();
+    callback save-order();
+    callback discard-order();
     callback toggle(id: string, on: bool);
     callback edit(id: string);
 }
@@ -94,7 +109,8 @@ component ModRowView inherits Rectangle {
     accessible-role: list-item;
     accessible-label: root.item.name + ", " + (root.item.position > 0 ? "on, load position " + root.item.position : "off")
         + (root.item.detail != "" ? ", " + root.item.detail : "")
-        + (root.item.problem != "" ? ". Problem: " + root.item.problem : "");
+        + (root.item.problem != "" ? ". Problem: " + root.item.problem : "")
+        + (root.item.notice != "" ? ". " + root.item.notice : "");
 
     content := HorizontalLayout {
         padding-left: 14px;
@@ -138,6 +154,13 @@ component ModRowView inherits Rectangle {
                 text: root.item.problem;
                 font-size: 12px;
                 color: Theme.danger;
+                wrap: word-wrap;
+                accessible-role: none;
+            }
+            if root.item.notice != "": Text {
+                text: root.item.notice;
+                font-size: 12px;
+                color: Theme.warning;
                 wrap: word-wrap;
                 accessible-role: none;
             }
@@ -245,12 +268,74 @@ export component AppWindow inherits Window {
             Messages { items: Ui.notes; }
         }
 
-        if Ui.screen == "mods": VerticalLayout {
+        if Ui.screen == "mods" && Ui.view == "order": VerticalLayout {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 6px;
+                spacing: 10px;
+                Text {
+                    text: "Load order";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: "Back to mods";
+                    clicked => { Ui.show-order(false); }
+                }
+                Button {
+                    text: "Auto-sort";
+                    clicked => { Ui.auto-sort(); }
+                }
+                Button {
+                    text: "Discard";
+                    enabled: Ui.order-dirty;
+                    accessible-label: "Discard unsaved load order changes";
+                    clicked => { Ui.discard-order(); }
+                }
+                Button {
+                    text: "Save";
+                    primary: true;
+                    enabled: Ui.order-dirty;
+                    accessible-label: "Save load order";
+                    clicked => { Ui.save-order(); }
+                }
+            }
+            VerticalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 10px;
+                spacing: 4px;
+                Text {
+                    text: Ui.order-summary + ". Top loads first, and the lower mod wins.";
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                if Ui.order-note != "": Text {
+                    text: Ui.order-note;
+                    font-size: 12px;
+                    color: Ui.order-note-error ? Theme.danger : Theme.ready;
+                    wrap: word-wrap;
+                }
+            }
+            OrderList {
+                vertical-stretch: 1;
+                rows: Ui.order-rows;
+                gutter: gutter;
+            }
+        }
+
+        if Ui.screen == "mods" && Ui.view != "order": VerticalLayout {
             vertical-stretch: 1;
             HorizontalLayout {
                 padding-left: gutter;
                 padding-right: gutter;
                 padding-bottom: 10px;
+                spacing: 12px;
                 Text {
                     text: "Mods";
                     font-size: 18px;
@@ -263,6 +348,10 @@ export component AppWindow inherits Window {
                     text: Ui.summary;
                     color: Theme.secondary-text;
                     vertical-alignment: center;
+                }
+                Button {
+                    text: "Load order";
+                    clicked => { Ui.show-order(true); }
                 }
             }
             list := ScrollView {

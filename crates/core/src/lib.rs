@@ -8,6 +8,7 @@
 
 pub mod framework;
 pub mod game;
+pub mod order;
 pub mod paths;
 pub mod smf;
 pub mod steam;

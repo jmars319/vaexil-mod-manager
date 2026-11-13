@@ -20,6 +20,11 @@ pub trait Framework {
     /// Saves which of a mod's options are chosen, given as their
     /// [`ModOption::value`]s. Returns `false` when nothing changed.
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String>;
+
+    /// Saves a new load order. It must hold exactly the mods that are on now,
+    /// first to last; anything else is refused. Returns `false` when the order
+    /// was already this.
+    fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +70,7 @@ impl Version {
 
 /// What a mod mostly changes, for grouping the Mods view. Information only:
 /// it never affects what the framework loads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ModKind {
     Gameplay,
     ModelsTextures,
@@ -73,6 +78,7 @@ pub enum ModKind {
     Dialogue,
     Ui,
     Text,
+    #[default]
     Other,
 }
 
@@ -118,7 +124,7 @@ impl ModKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModEntry {
     pub id: String,
     pub name: String,
@@ -135,6 +141,26 @@ pub struct ModEntry {
     pub problem: Option<String>,
     /// The options the user can choose, in the mod's own order.
     pub options: Vec<ModOption>,
+    /// Where the mod's author says it must load relative to other mods,
+    /// counting only rules that apply to the versions installed.
+    pub rules: Vec<OrderRule>,
+    /// Game files the mod replaces wholesale, as framework-specific keys. Two
+    /// enabled mods with the same key: the later one's file is used.
+    pub replaces: Vec<String>,
+}
+
+/// "Load before" or "load after" another mod.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relation {
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderRule {
+    pub relation: Relation,
+    /// The other mod's id.
+    pub other: String,
 }
 
 /// One choosable option of a mod.

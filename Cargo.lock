@@ -4680,6 +4680,7 @@ name = "vmm-core"
 version = "0.1.0"
 dependencies = [
  "json5",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

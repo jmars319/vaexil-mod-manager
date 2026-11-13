@@ -1,0 +1,147 @@
+// The Load order view: the mods that are on, first to last. Moves are a
+// draft until Save. Each row has Up and Down buttons, and can be dragged by
+// its handle.
+import { ScrollView } from "std-widgets.slint";
+import { Button, Theme } from "theme.slint";
+
+export struct OrderRowData {
+    id: string,
+    name: string,
+    position: int,
+    detail: string,
+    // Broken rules and overrides, in plain words.
+    notice: string,
+    can-up: bool,
+    can-down: bool,
+}
+
+export global OrderState {
+    callback move-mod(index: int, delta: int);
+}
+
+component OrderRowView inherits Rectangle {
+    in property <OrderRowData> item;
+    in property <int> index;
+    // The distance between the tops of two rows, for turning a drag into places.
+    in property <length> step;
+    property <length> drag: 0px;
+
+    height: 64px;
+    z: handle.pressed ? 10 : 0;
+    accessible-role: list-item;
+    accessible-label: root.item.position + ". " + root.item.name + ", " + root.item.detail
+        + (root.item.notice != "" ? ". " + root.item.notice : "");
+
+    Rectangle {
+        y: root.drag;
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        background: handle.pressed ? Theme.hover : Theme.surface;
+        border-width: 1px;
+        border-color: handle.pressed ? Theme.accent : Theme.surface-border;
+        drop-shadow-blur: handle.pressed ? 16px : 0px;
+        drop-shadow-color: Theme.shadow;
+
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 12px;
+            spacing: 10px;
+            // The drag handle: six dots. Its touch area sits outside this
+            // moving card, so the pointer is measured against the row's place.
+            Rectangle {
+                width: 22px;
+                for d in 6: Rectangle {
+                    x: Math.mod(d, 2) * 7px + 5px;
+                    y: (parent.height - 18px) / 2 + floor(d / 2) * 7px;
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Theme.secondary-text;
+                }
+            }
+            Text {
+                text: root.item.position;
+                width: 26px;
+                font-family: Theme.font-mono;
+                font-size: 12px;
+                color: Theme.accent;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                accessible-role: none;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.item.name;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    overflow: elide;
+                    accessible-role: none;
+                }
+                Text {
+                    text: root.item.notice != "" ? root.item.notice : root.item.detail;
+                    font-size: 12px;
+                    color: root.item.notice != "" ? Theme.warning : Theme.secondary-text;
+                    overflow: elide;
+                    accessible-role: none;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    text: "Up";
+                    enabled: root.item.can-up;
+                    accessible-label: "Move " + root.item.name + " up";
+                    clicked => { OrderState.move-mod(root.index, -1); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    text: "Down";
+                    enabled: root.item.can-down;
+                    accessible-label: "Move " + root.item.name + " down";
+                    clicked => { OrderState.move-mod(root.index, 1); }
+                }
+            }
+        }
+    }
+
+    handle := TouchArea {
+        x: 6px;
+        width: 22px;
+        height: parent.height;
+        mouse-cursor: grab;
+        moved => { root.drag = self.mouse-y - self.pressed-y; }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.up) {
+                OrderState.move-mod(root.index, round(root.drag / root.step));
+                root.drag = 0px;
+            }
+        }
+    }
+}
+
+export component OrderList inherits ScrollView {
+    in property <[OrderRowData]> rows;
+    in property <length> gutter;
+    property <length> gap: 8px;
+
+    VerticalLayout {
+        width: root.visible-width;
+        alignment: start;
+        padding-left: root.gutter;
+        padding-right: root.gutter;
+        padding-bottom: root.gutter;
+        spacing: root.gap;
+        for r[i] in root.rows: OrderRowView {
+            item: r;
+            index: i;
+            step: self.height + root.gap;
+        }
+    }
+}
