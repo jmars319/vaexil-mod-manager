@@ -111,7 +111,10 @@ fn an_ai_client_can_read_everything_and_change_only_when_allowed() {
         names,
         [
             "apply_plan",
+            "diagnose",
+            "get_deploy_report",
             "get_load_order",
+            "get_logs",
             "get_mod",
             "get_status",
             "list_error_codes",
@@ -159,4 +162,26 @@ fn an_ai_client_can_read_everything_and_change_only_when_allowed() {
     let journal = std::fs::read_to_string(tmp.path().join("data/journal.jsonl")).unwrap();
     let entry: Value = serde_json::from_str(journal.lines().last().unwrap()).unwrap();
     assert_eq!((entry["caller"].as_str(), entry["request"].as_str()), (Some("mcp:test-client"), Some("turn on B")));
+
+    // The event log has the refusal and the change, each with the client.
+    let events = s.call("get_logs", json!({ "limit": 20 }))["structuredContent"]["events"].as_array().unwrap().clone();
+    let seen: Vec<(String, String, String)> = events
+        .iter()
+        .map(|e| {
+            let f = |k: &str| e[k].as_str().unwrap_or_default().to_string();
+            (f("event"), f("level"), f("caller"))
+        })
+        .collect();
+    let has =
+        |event: &str, level: &str| seen.iter().any(|(e, l, c)| e == event && l == level && c == "mcp:test-client");
+    assert!(has("plan.made", "info"), "{seen:?}");
+    assert!(has("plan.applied", "error"), "the refusal is logged: {seen:?}");
+    assert!(has("mod.enabled", "info"), "{seen:?}");
+    assert!(has("plan.applied", "info"), "{seen:?}");
+
+    // No deploy yet; a diagnosis still comes back whole.
+    assert_eq!(s.call("get_deploy_report", json!({}))["structuredContent"]["report"], Value::Null);
+    let d = s.call("diagnose", json!({}))["structuredContent"].clone();
+    assert_eq!(d["status"]["enabled"], 2);
+    assert!(d["recentEvents"].as_array().unwrap().len() >= 4);
 }

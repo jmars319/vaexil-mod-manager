@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::Value;
 use vmm_core::backend::ModKind;
 use vmm_core::error::{ErrorCode, VmmError};
-use vmm_core::schema::{self, Change, ErrorCodeList, ErrorReport, SCHEMA_VERSION};
+use vmm_core::schema::{self, Change, ErrorCodeList, ErrorReport, LastDeploy, LogList, SCHEMA_VERSION};
 use vmm_engine::Engine;
 use vmm_engine::journal::Caller;
 
@@ -30,6 +30,11 @@ Reading (never changes anything):
   vmm mod <id>                  one mod
   vmm order                     the load order, broken rules and a suggested order
   vmm errors                    every error code, what it means and what to do
+  vmm logs [--limit <n>]        the newest events (50 by default): every change,
+                                who made it, and every failure
+  vmm deploy-report             the last deploy: stages, warnings and errors
+  vmm diagnose                  everything above in one object, for a bug report;
+                                paths under your profile start with ~
   vmm schema [--out <folder>]   the JSON Schema of every --json result
 
 Changing (plan first, then apply the plan):
@@ -65,6 +70,7 @@ struct Args {
     game: Option<PathBuf>,
     out: Option<PathBuf>,
     file: Option<String>,
+    limit: Option<usize>,
     words: Vec<String>,
 }
 
@@ -73,7 +79,7 @@ fn usage(message: impl Into<String>) -> VmmError {
 }
 
 fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
-    let mut args = Args { json: false, yes: false, game: None, out: None, file: None, words: vec![] };
+    let mut args = Args { json: false, yes: false, game: None, out: None, file: None, limit: None, words: vec![] };
     let mut it = raw.into_iter();
     let mut words_only = false;
     while let Some(a) = it.next() {
@@ -100,6 +106,10 @@ fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
             "--game" => args.game = Some(PathBuf::from(value("--game")?)),
             "--out" => args.out = Some(PathBuf::from(value("--out")?)),
             "--file" => args.file = Some(value("--file")?),
+            "--limit" => {
+                let v = value("--limit")?;
+                args.limit = Some(v.parse().map_err(|_| usage(format!("--limit needs a number, not {v}.")))?);
+            }
             f if f.starts_with("--") => return Err(usage(format!("Unknown option {f}."))),
             _ => args.words.push(a),
         }
@@ -119,6 +129,8 @@ fn out<T: Serialize>(value: &T, text: String) -> Out {
 
 fn main() -> ExitCode {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    let crash_caller = if raw == ["mcp"] { "mcp" } else { "cli" };
+    vmm_engine::crash::install(vmm_engine::host::data_dir(), crash_caller.into());
     // The MCP server owns stdout for the protocol, so it prints nothing else.
     if raw == ["mcp"] {
         return match mcp::serve() {
@@ -162,7 +174,7 @@ fn main() -> ExitCode {
 
 fn run(args: Args) -> Result<Out, VmmError> {
     let words: Vec<&str> = args.words.iter().map(String::as_str).collect();
-    let engine = || Engine::open();
+    let engine = || Engine::open_as(Caller::Cli);
     match words.as_slice() {
         [] | ["help"] => Ok(Out { json: serde_json::json!({ "usage": USAGE }), text: USAGE.into() }),
         ["version"] => Ok(Out {
@@ -179,6 +191,32 @@ fn run(args: Args) -> Result<Out, VmmError> {
             Ok(out(&list, text))
         }
         ["schema"] => write_schema(args.out.as_deref()),
+        ["logs"] => {
+            let list =
+                LogList { schema_version: SCHEMA_VERSION, events: engine().recent_events(args.limit.unwrap_or(50)) };
+            let text = if list.events.is_empty() {
+                "Nothing logged yet.\n".into()
+            } else {
+                list.events.iter().map(log_line).collect()
+            };
+            Ok(out(&list, text))
+        }
+        ["deploy-report"] => {
+            let last = LastDeploy { schema_version: SCHEMA_VERSION, report: engine().deploy_report() };
+            let text = last.report.as_ref().map_or_else(|| "No deploy has finished yet.\n".into(), report_text);
+            Ok(out(&last, text))
+        }
+        ["diagnose"] => {
+            let e = engine();
+            let game = match e.pick_game(args.game.as_deref()) {
+                Ok(g) => Some(g),
+                Err(err) if args.game.is_none() && err.code == ErrorCode::GameNotFound => None,
+                Err(err) => return Err(err),
+            };
+            let d = e.diagnose(game.as_ref());
+            let text = serde_json::to_string_pretty(&d).expect("json");
+            Ok(out(&d, text))
+        }
         ["games"] => {
             let list = engine().games();
             let text = if list.games.is_empty() {
@@ -330,6 +368,43 @@ fn write_schema(folder: Option<&Path>) -> Result<Out, VmmError> {
     written.push(errors.display().to_string());
     let text = written.iter().map(|p| format!("Wrote {p}\n")).collect();
     Ok(Out { json: serde_json::json!({ "schemaVersion": SCHEMA_VERSION, "written": written }), text })
+}
+
+fn log_line(e: &schema::LogEvent) -> String {
+    let level = match e.level {
+        schema::LogLevel::Info => "info ",
+        schema::LogLevel::Warn => "warn ",
+        schema::LogLevel::Error => "ERROR",
+    };
+    format!("{}  {level}  {:<20} {:<10} {}\n", vmm_engine::events::timestamp(e.ts_ms), e.event, e.caller, e.message)
+}
+
+fn report_text(r: &schema::DeployReport) -> String {
+    let mut t = match r.result {
+        schema::DeployResult::Succeeded => "The last deploy succeeded".to_string(),
+        schema::DeployResult::Failed => format!("The last deploy failed (exit code {})", r.exit_code.unwrap_or(-1)),
+        schema::DeployResult::DidNotRun => "The last deploy didn't run".to_string(),
+    };
+    if let Some(ms) = r.duration_ms {
+        t += &format!(" after {}m {}s", ms / 60_000, ms / 1000 % 60);
+    }
+    if let Some(at) = r.finished_at_ms {
+        t += &format!(", at {} UTC", vmm_engine::events::timestamp(at));
+    }
+    t += ".\n";
+    let mods = r.stages.iter().filter(|s| s.mod_id.is_some()).count();
+    t += &format!("{} stages, {mods} of them deploying a mod.\n", r.stages.len());
+    for e in &r.errors {
+        t += &format!("Error: {e}\n");
+    }
+    for w in &r.warnings {
+        let m = w.mod_name.as_deref().map(|m| format!("{m}: ")).unwrap_or_default();
+        t += &format!("Warning ({}), {m}{} time(s). {}\n", w.code, w.count, w.detail);
+    }
+    if let Some(log) = &r.log {
+        t += &format!("Log: {log} ({} lines)\n", r.log_lines);
+    }
+    t
 }
 
 fn status_text(s: &schema::StatusReport) -> String {

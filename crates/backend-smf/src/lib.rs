@@ -9,6 +9,7 @@ mod files;
 mod kind;
 pub mod options;
 mod releases;
+pub mod report;
 pub mod write;
 
 use std::cell::RefCell;
@@ -89,6 +90,10 @@ impl Backend for Smf {
                           and SMF's Deploy.exe builds the game's patch files."
                 .into(),
         }
+    }
+
+    fn read_deploy_log(&self, text: &str) -> vmm_core::backend::DeployLog {
+        report::read(text)
     }
 
     fn state_files(&self, game: &GameInstall, mods: &[String]) -> Vec<PathBuf> {

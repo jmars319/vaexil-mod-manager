@@ -1,0 +1,91 @@
+// The last deploy, read from SMF's own output: how it ended, its stages, and
+// its warnings grouped by kind and mod, each counted once.
+import { Button, ButtonRow, FieldLabel, Sheet, Theme } from "theme.slint";
+
+export struct ReportWarning {
+    // One line: the mod (or the kind of warning) and how many times.
+    title: string,
+}
+
+export global ReportState {
+    in property <string> outcome;
+    in property <bool> failed;
+    in property <string> stages;
+    in property <[ReportWarning]> warnings;
+    in property <[string]> errors;
+    // What the warnings shown mean, as one paragraph.
+    in property <string> meaning;
+    in property <bool> has-log;
+    // Set when more warnings or errors were left out than shown.
+    in property <string> more;
+    callback open-log();
+    callback close();
+}
+
+export component ReportSheet inherits Sheet {
+    title: "Last deploy";
+    subtitle: "What SMF's Deploy.exe reported, read from its log. A line Vaexil Mod Manager doesn't recognise stays in the log.";
+    panel-width: 620px;
+    close => { ReportState.close(); }
+
+    VerticalLayout {
+        spacing: 4px;
+        Text {
+            text: ReportState.outcome;
+            font-weight: 600;
+            color: ReportState.failed ? Theme.danger : Theme.text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: ReportState.stages;
+            color: Theme.secondary-text;
+            wrap: word-wrap;
+        }
+    }
+    if ReportState.errors.length > 0: VerticalLayout {
+        spacing: 6px;
+        FieldLabel { text: "Errors"; }
+        // One line each (a wrapped line in a list is measured short);
+        // the log has the full text.
+        for e in ReportState.errors: Text {
+            text: e;
+            color: Theme.danger;
+            overflow: elide;
+        }
+    }
+    VerticalLayout {
+        spacing: 8px;
+        FieldLabel { text: ReportState.warnings.length > 0 ? "Warnings" : "No warnings"; }
+        for w in ReportState.warnings: Text {
+            text: w.title;
+            font-weight: 600;
+            color: Theme.warning;
+            overflow: elide;
+        }
+    }
+    if ReportState.meaning != "": Text {
+        text: ReportState.meaning;
+        font-size: 12px;
+        color: Theme.secondary-text;
+        wrap: word-wrap;
+    }
+    if ReportState.more != "": Text {
+        text: ReportState.more;
+        font-size: 12px;
+        color: Theme.secondary-text;
+        wrap: word-wrap;
+    }
+
+    ButtonRow {
+        if ReportState.has-log: Button {
+            text: "Open log";
+            accessible-label: "Open the full deploy log";
+            clicked => { ReportState.open-log(); }
+        }
+        Button {
+            text: "Close";
+            accessible-label: "Close the deploy report";
+            clicked => { ReportState.close(); }
+        }
+    }
+}

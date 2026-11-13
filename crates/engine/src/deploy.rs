@@ -31,7 +31,10 @@ pub struct Record {
     pub success: Option<bool>,
     pub exit_code: Option<i32>,
     pub log: Option<String>,
+    /// When it finished.
     pub at_ms: Option<u64>,
+    /// When it started; missing for deploys before this was kept.
+    pub started_at_ms: Option<u64>,
 }
 
 impl Record {
@@ -43,6 +46,7 @@ impl Record {
             exit_code: m.get("exitCode").and_then(Value::as_i64).map(|c| c as i32),
             log: m.get("log").and_then(Value::as_str).map(str::to_string),
             at_ms: m.get("at").and_then(Value::as_u64),
+            started_at_ms: m.get("startedAt").and_then(Value::as_u64),
         }
     }
 
@@ -62,6 +66,9 @@ impl Record {
         }
         if let Some(t) = self.at_ms {
             m.insert("at".into(), Value::from(t));
+        }
+        if let Some(t) = self.started_at_ms {
+            m.insert("startedAt".into(), Value::from(t));
         }
         store::save(dir, RECORD, &m)
     }
@@ -83,6 +90,7 @@ pub struct Finished {
     pub fingerprint: Option<String>,
     pub log: Option<PathBuf>,
     pub then_play: bool,
+    pub started_ms: u64,
 }
 
 pub type Shared = Arc<Mutex<Progress>>;
@@ -112,6 +120,7 @@ pub fn start(progress: &Shared, game: GameInstall, logs: Option<PathBuf>, then_p
         *p = Progress { running: true, last_line: "Starting SMF's Deploy.exe…".into(), lines: 0, finished: None };
     }
     let progress = progress.clone();
+    let started_ms = now_ms();
     std::thread::spawn(move || {
         let smf = Smf::default();
         // The fingerprint before the deploy: a change made while it runs
@@ -136,7 +145,7 @@ pub fn start(progress: &Shared, game: GameInstall, logs: Option<PathBuf>, then_p
         drop(log);
         if let Ok(mut p) = progress.lock() {
             p.running = false;
-            p.finished = Some(Finished { result, fingerprint, log: log_path, then_play });
+            p.finished = Some(Finished { result, fingerprint, log: log_path, then_play, started_ms });
         }
     });
 }
@@ -248,6 +257,7 @@ mod tests {
             exit_code: Some(0),
             log: Some("l.log".into()),
             at_ms: Some(5),
+            started_at_ms: Some(1),
         };
         r.save(tmp.path()).unwrap();
         assert_eq!(Record::load(tmp.path()), r);

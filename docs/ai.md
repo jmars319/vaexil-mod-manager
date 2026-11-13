@@ -23,6 +23,9 @@ Each line is that app's own command for adding a server, and it changes only tha
 | `list_mods`, `get_mod` | Mods with their place in the order, type, options (and the value to choose each), load rules and file overrides. | No |
 | `get_load_order` | The order of the mods that are on, the rules it breaks, and an order that keeps them. | No |
 | `list_error_codes` | Every error code, what it means and what to do. | No |
+| `get_logs` | The newest events: every change, who made it (`gui`, `cli` or `mcp:<app>`), and every failure with its code. | No |
+| `get_deploy_report` | The last deploy, read from SMF's output: result, duration, stages, warnings grouped by kind and mod (each counted once), errors. | No |
+| `diagnose` | All of it at once for working out a problem, with paths in the user folder written as `~`. | No |
 | `plan_change` | Checks the changes you asked for and returns a plan: its steps in plain words and a `planId`. | No (it saves the plan for 10 minutes) |
 | `apply_plan` | Applies a plan once, if nothing it depends on has changed since. | Yes |
 

@@ -1,0 +1,669 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "appVersion": {
+      "type": "string"
+    },
+    "generatedAtMs": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "detection": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Where the game was looked for and what was found."
+    },
+    "status": {
+      "$ref": "#/$defs/StatusReport"
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Problem"
+      }
+    },
+    "lastDeploy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeployReport"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "recentEvents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LogEvent"
+      },
+      "description": "The newest 200 events, newest last."
+    },
+    "settings": {
+      "description": "The app's settings that change behaviour."
+    },
+    "crashes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Crash records the app has written, newest first, at most five."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "appVersion",
+    "generatedAtMs",
+    "detection",
+    "status",
+    "problems",
+    "recentEvents",
+    "settings",
+    "crashes"
+  ],
+  "description": "Everything needed to understand a problem, in one object. Paths under\nthe user's profile start with `~`.",
+  "title": "Diagnosis",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "StatusReport": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "appVersion": {
+          "type": "string"
+        },
+        "game": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GameView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackendView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installed": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "withProblems": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "description": "Mods whose description can't be read."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Problems worth knowing that don't stop the framework working."
+        },
+        "deploy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeployState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "setups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Saved setups, by name."
+        },
+        "passActive": {
+          "type": "boolean",
+          "description": "Whether a compatibility pass is under way."
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "appVersion",
+        "installed",
+        "enabled",
+        "withProblems",
+        "notes",
+        "setups",
+        "passActive"
+      ]
+    },
+    "GameView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id for the game, such as `hitman-woa`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "store": {
+          "type": "string",
+          "description": "Where it was found: Steam, Epic Games, Microsoft Store or Folder."
+        },
+        "folder": {
+          "type": "string",
+          "description": "The game folder."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "store",
+        "folder"
+      ],
+      "description": "A game install VMM found."
+    },
+    "BackendView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id, such as `smf`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/BackendState"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The framework's version, when it is one this build knows."
+        },
+        "unknownVersionSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For a version this build doesn't know: the hash that identifies it."
+        },
+        "folder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "problem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the framework can't be used, when `state` is `unreadable`."
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "nativeMods": {
+          "$ref": "#/$defs/NativeMods"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "capabilities",
+        "nativeMods"
+      ]
+    },
+    "BackendState": {
+      "type": "string",
+      "enum": [
+        "installed",
+        "not_installed",
+        "unreadable"
+      ],
+      "description": "Whether the mod framework is there and readable."
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The load orders the backend keeps, such as `[\"smf\"]`."
+        },
+        "options": {
+          "type": "boolean",
+          "description": "Whether mods can have options."
+        },
+        "deploy": {
+          "$ref": "#/$defs/DeployMethod"
+        },
+        "needsDeploy": {
+          "type": "boolean",
+          "description": "Whether a change reaches the game only after a deploy."
+        }
+      },
+      "required": [
+        "orders",
+        "options",
+        "deploy",
+        "needsDeploy"
+      ]
+    },
+    "DeployMethod": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "external_tool",
+          "description": "The framework's own tool builds the game's files (SMF's `Deploy.exe`)."
+        },
+        {
+          "type": "string",
+          "const": "place_files",
+          "description": "VMM places the files itself."
+        }
+      ],
+      "description": "How changes reach the game."
+    },
+    "NativeMods": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/NativeModsStatus"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "explanation"
+      ],
+      "description": "How VMM lives alongside the game's own mod system (ADR 0003, section 5)."
+    },
+    "NativeModsStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "none",
+          "description": "The game has no mod system of its own."
+        },
+        {
+          "type": "string",
+          "const": "coexists",
+          "description": "VMM shows the game's own mods read-only and works around them."
+        },
+        {
+          "type": "string",
+          "const": "coexists-with-limits",
+          "description": "As `coexists`, with the limits given in the explanation."
+        },
+        {
+          "type": "string",
+          "const": "unsupported",
+          "description": "VMM can't work safely alongside the game's own mods."
+        }
+      ]
+    },
+    "DeployState": {
+      "type": "object",
+      "properties": {
+        "upToDate": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the last successful deploy was of exactly the current mods and\nsettings. Absent when that can't be worked out."
+        },
+        "lastSuccess": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the last deploy succeeded. Absent when there has been none."
+        },
+        "lastAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the last deploy finished, in milliseconds since 1970 (UTC)."
+        },
+        "busy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Whether a deploy, or the game, is running now."
+        }
+      },
+      "description": "When the game last got the current mods."
+    },
+    "Problem": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable code, such as `mod.unreadable` or `order.rule_broken`."
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "description": "A problem worth knowing, from anywhere in the app."
+    },
+    "DeployReport": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "result": {
+          "$ref": "#/$defs/DeployResult"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "startedAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "finishedAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeployStage"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeployWarning"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Lines the tool marked as errors, and Vaexil Mod Manager's own reason\nwhen the tool could not run."
+        },
+        "log": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The full log."
+        },
+        "logLines": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "result",
+        "stages",
+        "warnings",
+        "errors",
+        "logLines"
+      ],
+      "description": "The last deploy, read from the deploy tool's own output. A line the\nparser doesn't recognise stays only in the raw log and never fails it."
+    },
+    "DeployResult": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "did_not_run",
+          "description": "The deploy tool could not be started, or ended without saying."
+        }
+      ],
+      "description": "How a deploy ended."
+    },
+    "DeployStage": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The mod the stage was for, when it was for one."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "description": "A stage the deploy tool reported, in order."
+    },
+    "DeployWarning": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable code such as `smf.raw_entity_file`, or `smf.warning` for one\nthis version doesn't recognise."
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The mod's name as the deploy tool gave it, when it named one."
+        },
+        "count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "description": "How many distinct warnings of this kind."
+        },
+        "detail": {
+          "type": "string",
+          "description": "What it means, in plain words."
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Up to five of the warnings as the tool wrote them."
+        }
+      },
+      "required": [
+        "code",
+        "count",
+        "detail",
+        "examples"
+      ],
+      "description": "Warnings of one kind about one mod, counted once each."
+    },
+    "LogEvent": {
+      "type": "object",
+      "properties": {
+        "tsMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Milliseconds since 1970 (UTC)."
+        },
+        "level": {
+          "$ref": "#/$defs/LogLevel"
+        },
+        "event": {
+          "type": "string",
+          "description": "What happened, such as `mod.enabled`, `plan.applied` or `deploy.finished`."
+        },
+        "caller": {
+          "type": "string",
+          "description": "Who made it happen: `gui`, `cli` or `mcp:<AI app name>`."
+        },
+        "game": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The plan, when the event is part of one."
+        },
+        "message": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the event is a failure."
+        }
+      },
+      "required": [
+        "tsMs",
+        "level",
+        "event",
+        "caller",
+        "message"
+      ],
+      "description": "One line of the app's event log (`logs\\vmm-<date>.jsonl`)."
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warn",
+        "error"
+      ],
+      "description": "How serious a logged event is."
+    },
+    "ErrorBody": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable code, such as `config.changed_meanwhile`."
+        },
+        "message": {
+          "type": "string",
+          "description": "What went wrong and what was (not) changed, for people."
+        },
+        "hint": {
+          "type": "string",
+          "description": "What to do about it."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether trying again later, without changing anything, can work."
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The process exit code `vmm` uses for this error."
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "hint",
+        "retryable",
+        "exitCode"
+      ]
+    }
+  }
+}

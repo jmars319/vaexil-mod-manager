@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "tsMs": "<tsMs>",
+      "level": "info",
+      "event": "plan.made",
+      "caller": "cli",
+      "game": "<tmp>/game",
+      "backend": "smf",
+      "mod": null,
+      "plan": "<plan>",
+      "message": "Planned 2 step(s).",
+      "error": null
+    },
+    {
+      "tsMs": "<tsMs>",
+      "level": "info",
+      "event": "mod.enabled",
+      "caller": "cli",
+      "game": "<tmp>/game",
+      "backend": "smf",
+      "mod": "B",
+      "plan": null,
+      "message": "Turned B on.",
+      "error": null
+    },
+    {
+      "tsMs": "<tsMs>",
+      "level": "info",
+      "event": "mod.enabled",
+      "caller": "cli",
+      "game": "<tmp>/game",
+      "backend": "smf",
+      "mod": "C",
+      "plan": null,
+      "message": "Turned C on.",
+      "error": null
+    },
+    {
+      "tsMs": "<tsMs>",
+      "level": "info",
+      "event": "plan.applied",
+      "caller": "cli",
+      "game": "<tmp>/game",
+      "backend": "smf",
+      "mod": null,
+      "plan": "<plan>",
+      "message": "Applied a plan: 2 of 2 step(s) changed something.",
+      "error": null
+    }
+  ]
+}

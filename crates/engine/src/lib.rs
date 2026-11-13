@@ -9,7 +9,10 @@
 //! framework goes through the backend, after a backup.
 
 pub mod contract;
+pub mod crash;
 pub mod deploy;
+pub mod diagnose;
+pub mod events;
 pub mod host;
 pub mod journal;
 pub mod settings;
@@ -24,7 +27,9 @@ use vmm_backend_smf::Smf;
 use vmm_core::backend::{Backend, Inspection, ModKind, Setup};
 use vmm_core::error::{ErrorCode, VmmError};
 use vmm_core::game::GameInstall;
+use vmm_core::schema::{ErrorReport, LogEvent, LogLevel};
 
+use journal::Caller;
 use settings::Settings;
 use setups::{Pass, Setups};
 
@@ -39,13 +44,101 @@ pub struct Engine {
     setups: RefCell<Result<Setups, VmmError>>,
     record: RefCell<deploy::Record>,
     progress: deploy::Shared,
+    /// Who is using this engine, for the event log and the journal.
+    caller: Caller,
 }
 
 impl Engine {
     /// The engine for this PC: the SMF backend, with backups in the app's
     /// data folder.
     pub fn open() -> Engine {
-        Engine::with_data_dir(host::data_dir())
+        Engine::open_as(Caller::Window)
+    }
+
+    /// The engine for this PC, used by `caller`. Old event logs are pruned.
+    pub fn open_as(caller: Caller) -> Engine {
+        let mut engine = Engine::with_data_dir(host::data_dir());
+        engine.caller = caller;
+        if let Some(dir) = engine.logs_dir() {
+            events::prune(&dir, deploy::now_ms());
+        }
+        engine
+    }
+
+    pub fn caller(&self) -> &Caller {
+        &self.caller
+    }
+
+    /// Where the event logs and deploy logs go.
+    pub fn logs_dir(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().map(|d| d.join("logs"))
+    }
+
+    /// Appends an event to the log. Best effort.
+    pub(crate) fn log(
+        &self,
+        level: LogLevel,
+        event: &str,
+        game: Option<&GameInstall>,
+        mod_id: Option<&str>,
+        message: String,
+        error: Option<&VmmError>,
+    ) {
+        self.log_plan(level, event, game, mod_id, None, message, error);
+    }
+
+    /// As [`Engine::log`], for an event that is part of a plan.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn log_plan(
+        &self,
+        level: LogLevel,
+        event: &str,
+        game: Option<&GameInstall>,
+        mod_id: Option<&str>,
+        plan: Option<&str>,
+        message: String,
+        error: Option<&VmmError>,
+    ) {
+        let Some(dir) = self.logs_dir() else { return };
+        let ev = LogEvent {
+            ts_ms: deploy::now_ms(),
+            level,
+            event: event.into(),
+            caller: self.caller.label(),
+            game: game.map(|g| g.root.display().to_string()),
+            backend: Some(self.backend.id().into()),
+            mod_id: mod_id.map(str::to_string),
+            plan: plan.map(str::to_string),
+            message,
+            error: error.map(|e| ErrorReport::from(e).error),
+        };
+        let _ = events::append(&dir, &ev);
+    }
+
+    /// Logs the outcome of a change: `ok` says what changed (or `None` when
+    /// nothing did, which isn't logged); a failure is logged as an error.
+    fn noted<T>(
+        &self,
+        event: &str,
+        game: Option<&GameInstall>,
+        mod_id: Option<&str>,
+        result: Result<T, VmmError>,
+        ok: impl FnOnce(&T) -> Option<String>,
+    ) -> Result<T, VmmError> {
+        match &result {
+            Ok(v) => {
+                if let Some(message) = ok(v) {
+                    self.log(LogLevel::Info, event, game, mod_id, message, None);
+                }
+            }
+            Err(e) => self.log(LogLevel::Error, event, game, mod_id, e.message.clone(), Some(e)),
+        }
+        result
+    }
+
+    /// The newest `limit` events, newest last.
+    pub fn recent_events(&self, limit: usize) -> Vec<LogEvent> {
+        self.logs_dir().map(|d| events::recent(&d, limit)).unwrap_or_default()
     }
 
     pub fn with_data_dir(data_dir: Option<PathBuf>) -> Engine {
@@ -69,6 +162,7 @@ impl Engine {
             setups: RefCell::new(setups),
             record: RefCell::new(record),
             progress: deploy::Shared::default(),
+            caller: Caller::Window,
         }
     }
 
@@ -107,18 +201,23 @@ impl Engine {
     // Mods.
 
     pub fn set_enabled(&self, game: &GameInstall, mod_id: &str, on: bool) -> Result<bool, VmmError> {
-        self.need_backups()?;
-        self.backend.set_enabled(game, mod_id, on)
+        let r = self.need_backups().and_then(|()| self.backend.set_enabled(game, mod_id, on));
+        let (event, word) = if on { ("mod.enabled", "on") } else { ("mod.disabled", "off") };
+        self.noted(event, Some(game), Some(mod_id), r, |changed| changed.then(|| format!("Turned {mod_id} {word}.")))
     }
 
     pub fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError> {
-        self.need_backups()?;
-        self.backend.set_options(game, mod_id, chosen)
+        let r = self.need_backups().and_then(|()| self.backend.set_options(game, mod_id, chosen));
+        self.noted("mod.options", Some(game), Some(mod_id), r, |changed| {
+            changed.then(|| format!("Chose options of {mod_id}: {}.", chosen.join(", ")))
+        })
     }
 
     pub fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, VmmError> {
-        self.need_backups()?;
-        self.backend.set_load_order(game, order)
+        let r = self.need_backups().and_then(|()| self.backend.set_load_order(game, order));
+        self.noted("order.saved", Some(game), None, r, |changed| {
+            changed.then(|| format!("Saved the load order: {}.", order.join(", ")))
+        })
     }
 
     // The app's own settings.
@@ -143,6 +242,12 @@ impl Engine {
     /// Sets (or, with `None`, clears) the type the user chose for a mod. The
     /// settings are read again first, so another window's change survives.
     pub fn set_kind(&self, mod_id: &str, kind: Option<ModKind>) -> Result<(), VmmError> {
+        let r = self.set_kind_inner(mod_id, kind);
+        let what = kind.map_or("the type its files suggest", |k| k.label());
+        self.noted("mod.kind", None, Some(mod_id), r, |()| Some(format!("Showed {mod_id} as {what}.")))
+    }
+
+    fn set_kind_inner(&self, mod_id: &str, kind: Option<ModKind>) -> Result<(), VmmError> {
         let dir = self.data_dir.clone().ok_or_else(|| {
             VmmError::new(
                 ErrorCode::BackupUnavailable,
@@ -166,6 +271,12 @@ impl Engine {
     }
 
     pub fn set_ai_changes(&self, on: bool) -> Result<(), VmmError> {
+        let r = self.set_ai_changes_inner(on);
+        let word = if on { "allowed" } else { "turned off" };
+        self.noted("settings.ai_changes", None, None, r, |()| Some(format!("Changes from AI tools {word}.")))
+    }
+
+    fn set_ai_changes_inner(&self, on: bool) -> Result<(), VmmError> {
         let dir = self.data_dir.clone().ok_or_else(|| {
             VmmError::new(ErrorCode::BackupUnavailable, "There is no folder to keep settings in. Nothing was changed.")
         })?;
@@ -198,28 +309,39 @@ impl Engine {
 
     /// Saves the mods that are on now as a setup named `name`.
     pub fn save_setup(&self, game: &GameInstall, name: &str) -> Result<(), VmmError> {
-        let mut setups = self.setups()?;
-        setups.put(name, self.backend.current_setup(game)?)?;
-        self.save_setups(setups)
+        let r = self.setups().and_then(|mut setups| {
+            setups.put(name, self.backend.current_setup(game)?)?;
+            self.save_setups(setups)
+        });
+        self.noted("setup.saved", Some(game), None, r, |()| Some(format!("Saved the setup \u{201c}{name}\u{201d}.")))
     }
 
     /// Switches to the saved setup at `index`. Returns its name and the mods
     /// it names that are no longer installed.
     pub fn use_setup(&self, game: &GameInstall, index: usize) -> Result<(String, Vec<String>), VmmError> {
-        self.need_backups()?;
-        let setups = self.setups()?;
-        let s =
-            setups.saved.get(index).ok_or_else(|| VmmError::new(ErrorCode::OptionInvalid, "That setup is gone."))?;
-        let skipped = self.backend.apply_setup(game, &s.setup)?;
-        Ok((s.name.clone(), skipped))
+        let r = self.need_backups().and_then(|()| {
+            let setups = self.setups()?;
+            let s = setups
+                .saved
+                .get(index)
+                .ok_or_else(|| VmmError::new(ErrorCode::OptionInvalid, "That setup is gone."))?;
+            let skipped = self.backend.apply_setup(game, &s.setup)?;
+            Ok((s.name.clone(), skipped))
+        });
+        self.noted("setup.used", Some(game), None, r, |(name, _)| {
+            Some(format!("Switched to the setup \u{201c}{name}\u{201d}."))
+        })
     }
 
     pub fn delete_setup(&self, index: usize) -> Result<(), VmmError> {
-        let mut setups = self.setups()?;
-        if index < setups.saved.len() {
-            setups.saved.remove(index);
-        }
-        self.save_setups(setups)
+        let r = self.setups().and_then(|mut setups| {
+            let name = (index < setups.saved.len()).then(|| setups.saved.remove(index).name);
+            self.save_setups(setups).map(|()| name)
+        });
+        self.noted("setup.deleted", None, None, r, |name| {
+            name.as_ref().map(|n| format!("Deleted the setup \u{201c}{n}\u{201d}."))
+        })
+        .map(|_| ())
     }
 
     // Compatibility passes.
@@ -244,33 +366,41 @@ impl Engine {
 
     /// Starts a pass: from every mod off, or from the mods on now.
     pub fn start_pass(&self, game: &GameInstall, from_current: bool) -> Result<(), VmmError> {
-        self.pass_step(game, |pass, mods| {
+        let r = self.pass_step(game, |pass, mods| {
             let baseline = if from_current { enabled_order(mods) } else { vec![] };
             *pass = Some(Pass { baseline, batches: vec![] });
             Ok(())
-        })
+        });
+        let from = if from_current { "the mods on now" } else { "every mod off" };
+        self.noted("pass.started", Some(game), None, r, |()| Some(format!("Started a compatibility pass from {from}.")))
     }
 
     pub fn begin_batch(&self, game: &GameInstall, name: &str, mods: Vec<String>) -> Result<(), VmmError> {
-        self.pass_step(game, |pass, _| {
+        let list = mods.join(", ");
+        let r = self.pass_step(game, |pass, _| {
             pass.as_mut().ok_or_else(|| VmmError::new(ErrorCode::PassState, "Start a pass first."))?.begin(name, mods)
-        })
+        });
+        self.noted("pass.batch", Some(game), None, r, |()| Some(format!("Trying a batch: {list}.")))
     }
 
     pub fn mark_batch(&self, game: &GameInstall, good: bool, notes: &str) -> Result<(), VmmError> {
-        self.pass_step(game, |pass, mods| {
+        let r = self.pass_step(game, |pass, mods| {
             let order = enabled_order(mods);
             pass.as_mut()
                 .ok_or_else(|| VmmError::new(ErrorCode::PassState, "There is no pass."))?
                 .mark(good, &order, notes)
-        })
+        });
+        let word = if good { "good" } else { "bad" };
+        self.noted("pass.marked", Some(game), None, r, |()| Some(format!("Marked the batch {word}. {notes}")))
     }
 
     /// Ends the pass and keeps the game as it is now.
     pub fn end_pass(&self) -> Result<(), VmmError> {
-        let mut setups = self.setups()?;
-        setups.pass = None;
-        self.save_setups(setups)
+        let r = self.setups().and_then(|mut setups| {
+            setups.pass = None;
+            self.save_setups(setups)
+        });
+        self.noted("pass.ended", None, None, r, |()| Some("Ended the compatibility pass.".into()))
     }
 
     // Deploy and Play.
@@ -299,12 +429,14 @@ impl Engine {
     /// Starts a deploy on a worker thread. `then_play` starts the game when it
     /// succeeds (see [`Engine::finish_deploy`]).
     pub fn start_deploy(&self, game: &GameInstall, then_play: bool) -> Result<(), VmmError> {
-        if let Some(why) = self.blocker() {
-            return Err(why);
-        }
-        let logs = self.data_dir.as_ref().map(|d| d.join("logs"));
-        deploy::start(&self.progress, game.clone(), logs, then_play);
-        Ok(())
+        let r = match self.blocker() {
+            Some(why) => Err(why),
+            None => {
+                deploy::start(&self.progress, game.clone(), self.logs_dir(), then_play);
+                Ok(())
+            }
+        };
+        self.noted("deploy.started", Some(game), None, r, |()| Some("Started a deploy.".into()))
     }
 
     /// Whether a deploy is running, and its latest output line.
@@ -325,7 +457,22 @@ impl Engine {
             exit_code: f.result.as_ref().ok().and_then(|o| o.exit_code),
             log: f.log.map(|p| p.display().to_string()),
             at_ms: Some(deploy::now_ms()),
+            started_at_ms: Some(f.started_ms),
         };
+        match &f.result {
+            Ok(_) if success => {
+                self.log(LogLevel::Info, "deploy.finished", game, None, "The deploy succeeded.".into(), None)
+            }
+            Ok(o) => self.log(
+                LogLevel::Warn,
+                "deploy.finished",
+                game,
+                None,
+                format!("The deploy failed (exit code {}).", o.exit_code.map_or("none".into(), |c| c.to_string())),
+                None,
+            ),
+            Err(e) => self.log(LogLevel::Error, "deploy.finished", game, None, e.message.clone(), Some(e)),
+        }
         if let Some(dir) = &self.data_dir {
             let _ = record.save(dir);
         }

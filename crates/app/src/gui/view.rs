@@ -211,6 +211,9 @@ mod tests {
         fn native_mods(&self) -> vmm_core::schema::NativeMods {
             unreachable!("the view doesn't show native mods")
         }
+        fn read_deploy_log(&self, _: &str) -> vmm_core::backend::DeployLog {
+            unreachable!("the view never reads deploy logs")
+        }
         fn state_files(&self, _: &GameInstall, _: &[String]) -> Vec<PathBuf> {
             unreachable!("the view never plans")
         }
