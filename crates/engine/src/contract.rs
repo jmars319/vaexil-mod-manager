@@ -875,7 +875,7 @@ mod tests {
             .unwrap();
         let placed = engine.current_setup(&game).unwrap().order;
         assert_eq!(placed, ["A"], "planning changed nothing");
-        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
         let order = engine.current_setup(&game).unwrap().order;
         let c = order.iter().position(|m| m == "C").unwrap();
         let described: usize = plan.steps[1]
@@ -910,7 +910,7 @@ mod tests {
                 ],
             )
             .unwrap();
-        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
         let order = engine.current_setup(&game).unwrap().order;
         let described: usize = plan.steps[2]
             .description
@@ -936,7 +936,7 @@ mod tests {
         let set = || Change::SetOptions { mod_id: "A".into(), chosen: vec!["X".into()] };
         let plan = engine.plan(&game, vec![set()]).unwrap();
         assert!(plan.steps[0].changes_something, "storing it changes what Deploy.exe applies");
-        assert!(engine.apply_plan(&game, &plan.plan_id).unwrap().steps[0].changes_something);
+        assert!(engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap().steps[0].changes_something);
         // Stored now, the same choice is already so.
         assert!(!engine.plan(&game, vec![set()]).unwrap().steps[0].changes_something);
     }
