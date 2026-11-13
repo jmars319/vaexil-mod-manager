@@ -428,10 +428,10 @@ impl Engine {
 
     /// The setups and pass as saved now, read again from disk.
     fn fresh_setups(&self) -> Result<setups::Setups, VmmError> {
-        match self.data_dir() {
-            Some(dir) => setups::Setups::load(dir),
-            None => Err(VmmError::new(ErrorCode::BackupUnavailable, "There is no folder to keep setups in.")),
+        if self.data_dir().is_none() {
+            return Err(VmmError::new(ErrorCode::BackupUnavailable, "There is no folder to keep setups in."));
         }
+        self.setups()
     }
 
     /// The saved setup named `name` (ignoring case), by its place in the list.
@@ -1453,6 +1453,27 @@ mod tests {
             (entries[1]["steps"][0]["description"].as_str(), entries[1]["request"].as_str()),
             (Some("Turn B on"), Some("why"))
         );
+    }
+
+    #[test]
+    fn setup_steps_act_on_setups_saved_by_another_front_end() {
+        let (tmp, game, engine) = setup();
+        let data = tmp.path().join("data");
+        run(&engine, &game, Change::SaveSetup { name: "One".into() });
+        // Another front end replaces "One" with B alone and adds "Two".
+        let other = Engine::with_data_dir(Some(data.clone()));
+        other.set_enabled(&game, "A", false).unwrap();
+        other.set_enabled(&game, "B", true).unwrap();
+        other.save_setup(&game, "One").unwrap();
+        other.save_setup(&game, "Two").unwrap();
+        other.set_enabled(&game, "B", false).unwrap();
+        // This engine, made before, uses the new "One" and keeps "Two".
+        let step = run(&engine, &game, Change::UseSetup { name: "One".into() });
+        assert!(step.description.ends_with("in this order: B"), "{}", step.description);
+        assert_eq!(engine.current_setup(&game).unwrap().order, ["B"]);
+        run(&engine, &game, Change::SaveSetup { name: "Three".into() });
+        let names: Vec<String> = engine.setups().unwrap().saved.into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["One", "Two", "Three"]);
     }
 
     #[test]

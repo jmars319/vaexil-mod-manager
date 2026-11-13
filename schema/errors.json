@@ -154,6 +154,13 @@
       "hint": "Tell the user. They can turn on \"Let AI tools make changes\" in Vaexil Mod Manager's Settings, or make the change themselves.",
       "retryable": false,
       "exitCode": 3
+    },
+    {
+      "code": "deploy.failed",
+      "meaning": "The framework's deploy ran and reported failure.",
+      "hint": "Read the deploy report (vmm deploy-report): its errors and the log name the mod or file that failed.",
+      "retryable": false,
+      "exitCode": 6
     }
   ]
 }

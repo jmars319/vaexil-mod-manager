@@ -701,7 +701,7 @@ mod tests {
         assert_eq!(list.codes.len(), ErrorCode::ALL.len());
         for c in &list.codes {
             assert!(!c.hint.is_empty() && !c.meaning.is_empty(), "{}", c.code);
-            assert!([2, 3, 4, 5, 10].contains(&c.exit_code), "{}", c.code);
+            assert!([2, 3, 4, 5, 6, 10].contains(&c.exit_code), "{}", c.code);
         }
         let mut codes: Vec<&str> = list.codes.iter().map(|c| c.code.as_str()).collect();
         codes.sort();

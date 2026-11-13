@@ -289,7 +289,13 @@ impl Engine {
 
     // Setups.
 
+    /// The saved setups and the pass, read again from disk, so a change
+    /// made by another front end (the window, `vmm`, an AI tool) is never
+    /// overwritten or acted on from a stale copy.
     pub fn setups(&self) -> Result<Setups, VmmError> {
+        if let Some(dir) = &self.data_dir {
+            *self.setups.borrow_mut() = Setups::load(dir);
+        }
         self.setups.borrow().clone()
     }
 

@@ -4,7 +4,8 @@
 //! command prints exactly one JSON object on stdout, its result or an
 //! `ErrorReport`, in the shapes `vmm schema` describes. Exit codes are stable:
 //! 0 ok, 2 bad usage, 3 refused by a rule, 4 changed meanwhile, 5 the game or
-//! a deploy is running, 10 unexpected. Nothing changes without `--yes`.
+//! a deploy is running, 6 the deploy ran and failed, 10 unexpected. Nothing
+//! changes without `--yes`.
 
 mod mcp;
 
@@ -151,10 +152,12 @@ fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
 struct Out {
     json: Value,
     text: String,
+    /// Nonzero when the command ran but what it ran failed (a deploy).
+    exit: u8,
 }
 
 fn out<T: Serialize>(value: &T, text: String) -> Out {
-    Out { json: serde_json::to_value(value).expect("results serialize"), text }
+    Out { json: serde_json::to_value(value).expect("results serialize"), text, exit: 0 }
 }
 
 fn main() -> ExitCode {
@@ -188,7 +191,7 @@ fn main() -> ExitCode {
                     let _ = writeln!(stdout);
                 }
             }
-            ExitCode::SUCCESS
+            ExitCode::from(o.exit)
         }
         Err(e) => {
             let report = ErrorReport::from(&e);
@@ -206,10 +209,11 @@ fn run(args: Args) -> Result<Out, VmmError> {
     let words: Vec<&str> = args.words.iter().map(String::as_str).collect();
     let engine = || Engine::open_as(Caller::Cli);
     match words.as_slice() {
-        [] | ["help"] => Ok(Out { json: serde_json::json!({ "usage": USAGE }), text: USAGE.into() }),
+        [] | ["help"] => Ok(Out { json: serde_json::json!({ "usage": USAGE }), text: USAGE.into(), exit: 0 }),
         ["version"] => Ok(Out {
             json: serde_json::json!({ "schemaVersion": SCHEMA_VERSION, "appVersion": env!("CARGO_PKG_VERSION") }),
             text: format!("vmm {} (schema {SCHEMA_VERSION})", env!("CARGO_PKG_VERSION")),
+            exit: 0,
         }),
         ["errors"] => {
             let list = ErrorCodeList::current();
@@ -304,7 +308,10 @@ fn run(args: Args) -> Result<Out, VmmError> {
                 }
             })?;
             let text = status.report.as_ref().map_or_else(|| "The deploy finished.\n".into(), report_text);
-            Ok(out(&status, text))
+            // The report is printed either way; a failed deploy exits nonzero.
+            let failed = status.report.as_ref().is_none_or(|r| r.result != schema::DeployResult::Succeeded);
+            let code = u8::try_from(ErrorCode::DeployFailed.exit_code()).unwrap_or(10);
+            Ok(Out { exit: if failed { code } else { 0 }, ..out(&status, text) })
         }
         ["plan", rest @ ..] => {
             let changes = changes_from(rest, args.file.as_deref(), args.name.as_deref(), args.from_current)?;
@@ -427,7 +434,7 @@ fn write_schema(folder: Option<&Path>) -> Result<Out, VmmError> {
     let Some(folder) = folder else {
         let json = Value::Object(bundle);
         let text = serde_json::to_string_pretty(&json).expect("json");
-        return Ok(Out { json, text });
+        return Ok(Out { json, text, exit: 0 });
     };
     let save = |path: PathBuf, text: String| {
         std::fs::write(&path, text)
@@ -445,7 +452,7 @@ fn write_schema(folder: Option<&Path>) -> Result<Out, VmmError> {
     save(errors.clone(), serde_json::to_string_pretty(&ErrorCodeList::current()).expect("json") + "\n")?;
     written.push(errors.display().to_string());
     let text = written.iter().map(|p| format!("Wrote {p}\n")).collect();
-    Ok(Out { json: serde_json::json!({ "schemaVersion": SCHEMA_VERSION, "written": written }), text })
+    Ok(Out { json: serde_json::json!({ "schemaVersion": SCHEMA_VERSION, "written": written }), text, exit: 0 })
 }
 
 fn setups_text(l: &schema::SetupList) -> String {
