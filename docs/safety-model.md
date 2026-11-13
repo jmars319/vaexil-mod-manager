@@ -47,6 +47,7 @@ The deploy report ("Report" in the window, `vmm deploy-report`, and the `get_dep
 | SMF's `cleanThumbs.dat` | Before a deploy, only when its game build (BuildID) is older than the game's own `Retail\thumbs.dat`, which happens after a game update. | Copied to `smf-backups\cleanThumbs-<build>-<time>.dat`, then removed, so SMF copies the current one again as it does when the file is missing. `crates/backend-smf/src/thumbs.rs`. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-updates\` | While an SMF update runs. | The download (`Release-<version>.zip`, through `.part` until complete) and its unpacked `staging` folder, both removed when the update is done. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-backups\` | Before an SMF update, and before setting aside a stale `cleanThumbs.dat`. | Copies of the files replaced. The newest 2 update backups are kept. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\smf-updating` | While an SMF update runs. | The time it started. While it is there (and under two hours old), Deploy and Play wait; it is removed when the update ends. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-update.json`, `smf-versions.json` | When SMF's releases are checked, and after an update. | The last check (installed and newest version, when), and the SHA-256 of each `Deploy.exe` this app installed with its version, so a release the built-in table doesn't list is still named. |
 
 Enforcement:
