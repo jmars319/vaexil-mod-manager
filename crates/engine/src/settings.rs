@@ -22,6 +22,9 @@ pub fn path(dir: &Path) -> PathBuf {
 pub struct Settings {
     /// Mod id (as SMF's load order names it) to the type the user chose.
     pub kind_overrides: BTreeMap<String, ModKind>,
+    /// Settings' "Let AI tools make changes". Off unless the user turns it
+    /// on; while off, AI tools can read and plan but not apply.
+    pub ai_changes: bool,
     rest: Map<String, Value>,
 }
 
@@ -64,7 +67,8 @@ impl Settings {
                 }
             }
         }
-        Ok(Settings { kind_overrides, rest })
+        let ai_changes = rest.remove("aiChanges").and_then(|v| v.as_bool()).unwrap_or(false);
+        Ok(Settings { kind_overrides, ai_changes, rest })
     }
 
     /// Writes `settings.json` in `dir`, replacing it in one rename.
@@ -83,6 +87,9 @@ impl Settings {
                 self.kind_overrides.iter().map(|(id, k)| (id.clone(), Value::String(k.key().into()))).collect(),
             ),
         );
+        if self.ai_changes {
+            map.insert("aiChanges".into(), Value::Bool(true));
+        }
         let mut text = serde_json::to_string_pretty(&Value::Object(map)).expect("a JSON object always serializes");
         text.push('\n');
         let temp: PathBuf = dir.join(format!("{FILE}.{}.tmp", std::process::id()));

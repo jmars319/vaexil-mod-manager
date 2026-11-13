@@ -18,6 +18,10 @@ vmm-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
+# The MCP server (`vmm mcp`): stdio only. No HTTP, TLS or network transport
+# is enabled; deny.toml's ban on those crates must keep passing.
+rmcp = { version = "3.10", default-features = false, features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "io-std", "sync"] }
 
 [dev-dependencies]
 tempfile.workspace = true

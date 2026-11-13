@@ -1,6 +1,7 @@
 // Settings: changes outside VMM happen only from here, after the user has
 // seen exactly what will change (ADR 0003, owner's decision 3).
-import { Button, ButtonRow, FieldLabel, Sheet, Theme } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Button, ButtonRow, FieldLabel, Sheet, Switch, Theme } from "theme.slint";
 
 export global SettingsState {
     // The full path of vmm.exe, or empty when it isn't beside the app.
@@ -17,6 +18,47 @@ export global SettingsState {
     callback remove-from-path();
     callback cancel-add();
     callback close();
+    // "Let AI tools make changes", kept in the app's settings.json.
+    in-out property <bool> ai-changes;
+    in property <string> ai-note;
+    callback set-ai-changes(on: bool);
+    // Each AI app's own command for adding vmm's MCP server.
+    in property <string> claude-command;
+    in property <string> gemini-command;
+    in property <string> codex-command;
+}
+
+component CommandLine inherits VerticalLayout {
+    in property <string> app;
+    in property <string> command;
+    spacing: 4px;
+    Text {
+        text: root.app;
+        font-size: 12px;
+        font-weight: 600;
+        color: Theme.text;
+    }
+    // Read-only text that wraps, so the whole command shows and can be
+    // selected and copied with Ctrl+C.
+    Rectangle {
+        border-radius: 8px;
+        background: Theme.window-background;
+        border-width: 1px;
+        border-color: Theme.surface-border;
+        min-height: field.preferred-height + 16px;
+        field := TextInput {
+            x: 10px;
+            width: parent.width - 20px;
+            text: root.command;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            font-family: Theme.font-mono;
+            font-size: 12px;
+            color: Theme.text;
+            accessible-label: root.app + " command";
+        }
+    }
 }
 
 export component SettingsSheet inherits Sheet {
@@ -25,81 +67,140 @@ export component SettingsSheet inherits Sheet {
     panel-width: 600px;
     close => { SettingsState.close(); }
 
-    VerticalLayout {
-        spacing: 6px;
-        FieldLabel { text: "Command line"; }
-        Text {
-            text: "vmm.exe does what the window does, from a terminal or an AI tool: “vmm status”, “vmm mods”, and for changes “vmm plan” then “vmm apply --yes”. Add --json for output that tools can read.";
-            color: Theme.text;
-            wrap: word-wrap;
-        }
-        if SettingsState.cli-exe != "": Text {
-            text: SettingsState.cli-exe;
-            font-family: Theme.font-mono;
-            font-size: 12px;
-            color: Theme.secondary-text;
-            wrap: word-wrap;
-        }
-        Text {
-            text: SettingsState.cli-exe == "" ? "vmm.exe isn't beside the app, so it can't be added to PATH. Reinstall Vaexil Mod Manager to get it."
-                : SettingsState.on-path ? "It is on your PATH, so vmm works in any new terminal."
-                : "It isn't on your PATH. Until it is, run it by its full path.";
-            color: Theme.secondary-text;
-            wrap: word-wrap;
-        }
-    }
-
-    if SettingsState.confirming: VerticalLayout {
-        spacing: 8px;
-        Text {
-            text: "This adds one folder to the end of your own PATH (the Path value in HKEY_CURRENT_USER\\Environment):";
-            color: Theme.text;
-            wrap: word-wrap;
-        }
-        Text {
-            text: SettingsState.cli-folder;
-            font-family: Theme.font-mono;
-            font-size: 12px;
-            color: Theme.text;
-            wrap: word-wrap;
-        }
-        Text {
-            text: "Nothing else in PATH changes, and the system PATH isn't touched. Terminals opened afterwards find vmm; ones already open don't. You can take it out again here.";
-            color: Theme.secondary-text;
-            wrap: word-wrap;
-        }
-        ButtonRow {
-            Button {
-                text: "Cancel";
-                accessible-label: "Cancel adding to PATH";
-                clicked => { SettingsState.cancel-add(); }
+    // The sections scroll and Close stays in view, so a short window never
+    // hides it. The sheet's title, subtitle and Close take about 240px.
+    body := ScrollView {
+        height: min(inner.preferred-height, max(160px, root.height - 250px));
+        inner := VerticalLayout {
+            width: body.visible-width;
+            padding-right: 10px;
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 6px;
+                FieldLabel { text: "Command line"; }
+                Text {
+                    text: "vmm.exe does what the window does, from a terminal or an AI tool: “vmm status”, “vmm mods”, and for changes “vmm plan” then “vmm apply --yes”. Add --json for output that tools can read.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                if SettingsState.cli-exe != "": Text {
+                    text: SettingsState.cli-exe;
+                    font-family: Theme.font-mono;
+                    font-size: 12px;
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: SettingsState.cli-exe == "" ? "vmm.exe isn't beside the app, so it can't be added to PATH. Reinstall Vaexil Mod Manager to get it."
+                        : SettingsState.on-path ? "It is on your PATH, so vmm works in any new terminal."
+                        : "It isn't on your PATH. Until it is, run it by its full path.";
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
             }
-            Button {
-                text: "Add to PATH";
-                primary: true;
-                clicked => { SettingsState.confirm-add(); }
+
+            if SettingsState.confirming: VerticalLayout {
+                spacing: 8px;
+                Text {
+                    text: "This adds one folder to the end of your own PATH (the Path value in HKEY_CURRENT_USER\\Environment):";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: SettingsState.cli-folder;
+                    font-family: Theme.font-mono;
+                    font-size: 12px;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "Nothing else in PATH changes, and the system PATH isn't touched. Terminals opened afterwards find vmm; ones already open don't. You can take it out again here.";
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                ButtonRow {
+                    Button {
+                        text: "Cancel";
+                        accessible-label: "Cancel adding to PATH";
+                        clicked => { SettingsState.cancel-add(); }
+                    }
+                    Button {
+                        text: "Add to PATH";
+                        primary: true;
+                        clicked => { SettingsState.confirm-add(); }
+                    }
+                }
+            }
+
+            if !SettingsState.confirming && SettingsState.cli-exe != "": HorizontalLayout {
+                alignment: start;
+                if !SettingsState.on-path: Button {
+                    text: "Add the command line to my PATH";
+                    clicked => { SettingsState.add-to-path(); }
+                }
+                if SettingsState.on-path: Button {
+                    text: "Take it out of my PATH";
+                    accessible-label: "Take the command line out of my PATH";
+                    clicked => { SettingsState.remove-from-path(); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+                FieldLabel { text: "AI tools"; }
+                Text {
+                    text: "“vmm mcp” lets an AI app such as Claude Code, Gemini CLI or Codex CLI read your mods and, if you allow it here, change them when you ask. It runs only while the AI app runs it, and makes no network connection.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Switch {
+                        text: "Let AI tools make changes";
+                        checked: SettingsState.ai-changes;
+                        toggled => {
+                            SettingsState.set-ai-changes(self.checked);
+                            self.checked = SettingsState.ai-changes;
+                        }
+                    }
+                }
+                Text {
+                    text: SettingsState.ai-changes
+                        ? "On. An AI tool changes something only when you have asked for it, after showing you the plan. Each change is recorded with your request in journal.jsonl."
+                        : "Off. AI tools can read your mods and plan changes, but can't apply them.";
+                    font-size: 12px;
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                if SettingsState.ai-note != "": Text {
+                    text: SettingsState.ai-note;
+                    font-size: 12px;
+                    color: Theme.danger;
+                    wrap: word-wrap;
+                }
+            }
+
+            if SettingsState.cli-exe != "": VerticalLayout {
+                spacing: 8px;
+                FieldLabel { text: "Connect an AI app"; }
+                Text {
+                    text: "Run the line for your app in a terminal. It is that app's own command for adding a server; Vaexil Mod Manager doesn't edit other apps' settings.";
+                    font-size: 12px;
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                CommandLine { app: "Claude Code"; command: SettingsState.claude-command; }
+                CommandLine { app: "Gemini CLI"; command: SettingsState.gemini-command; }
+                CommandLine { app: "Codex CLI"; command: SettingsState.codex-command; }
+            }
+
+            if SettingsState.note != "": Text {
+                text: SettingsState.note;
+                font-size: 12px;
+                color: SettingsState.note-error ? Theme.danger : Theme.ready;
+                wrap: word-wrap;
             }
         }
-    }
-
-    if !SettingsState.confirming && SettingsState.cli-exe != "": HorizontalLayout {
-        alignment: start;
-        if !SettingsState.on-path: Button {
-            text: "Add the command line to my PATH";
-            clicked => { SettingsState.add-to-path(); }
-        }
-        if SettingsState.on-path: Button {
-            text: "Take it out of my PATH";
-            accessible-label: "Take the command line out of my PATH";
-            clicked => { SettingsState.remove-from-path(); }
-        }
-    }
-
-    if SettingsState.note != "": Text {
-        text: SettingsState.note;
-        font-size: 12px;
-        color: SettingsState.note-error ? Theme.danger : Theme.ready;
-        wrap: word-wrap;
     }
 
     ButtonRow {

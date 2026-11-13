@@ -21,6 +21,7 @@ use vmm_core::schema::{
     StatusReport,
 };
 
+use crate::journal::{self, Caller};
 use crate::{Engine, deploy, enabled_order, host, settings};
 
 /// How long a plan can be applied for.
@@ -476,8 +477,33 @@ impl Engine {
             .unwrap_or(GameInstall { store: vmm_core::game::Store::Folder, root }))
     }
 
-    /// Applies a saved plan, once, if nothing it depends on has changed.
-    pub fn apply_plan(&self, game: &GameInstall, plan_id: &str) -> Result<ApplyReport, VmmError> {
+    /// Applies a saved plan, once, if nothing it depends on has changed, and
+    /// records it in the journal with who asked. An AI tool (`Caller::Mcp`)
+    /// must pass the user's `request` it acts on, and is refused while
+    /// Settings' "Let AI tools make changes" is off.
+    pub fn apply_plan(
+        &self,
+        game: &GameInstall,
+        plan_id: &str,
+        caller: &Caller,
+        request: Option<&str>,
+    ) -> Result<ApplyReport, VmmError> {
+        let request = request.map(str::trim).filter(|r| !r.is_empty());
+        if caller.is_ai() {
+            if !self.ai_changes_allowed() {
+                return Err(VmmError::new(
+                    ErrorCode::AiChangesOff,
+                    "Changes from AI tools are turned off in Vaexil Mod Manager's Settings. Nothing was changed.",
+                ));
+            }
+            if request.is_none() {
+                return Err(VmmError::new(
+                    ErrorCode::Usage,
+                    "Pass the user's own request for this change as `request`. AI tools change nothing on their \
+                     own initiative. Nothing was changed.",
+                ));
+            }
+        }
         let not_found = || {
             VmmError::new(
                 ErrorCode::PlanNotFound,
@@ -560,10 +586,20 @@ impl Engine {
                 }
                 Err(e) if i == 0 => return Err(e),
                 Err(e) => {
+                    // The steps before stay applied: record them, and who
+                    // asked, with the failure.
+                    let journal = self
+                        .data_dir()
+                        .map(|dir| journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps, Some(&e)));
+                    let unrecorded = match journal {
+                        Some(Err(j)) => format!(" They couldn't be added to the journal: {j}"),
+                        _ => String::new(),
+                    };
                     return Err(VmmError::new(
                         e.code,
                         format!(
-                            "{} The first {i} step(s) of the plan were applied, each after a backup; the rest were not.",
+                            "{} The first {i} step(s) of the plan were applied, each after a backup; the rest were \
+                             not.{unrecorded}",
                             e.message
                         ),
                     ));
@@ -571,7 +607,12 @@ impl Engine {
             }
         }
         needs_deploy &= self.backend().capabilities().needs_deploy;
-        Ok(ApplyReport { schema_version: SCHEMA_VERSION, plan_id: plan.plan_id, steps, needs_deploy })
+        let journal_problem = self.data_dir().and_then(|dir| {
+            journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps, None)
+                .err()
+                .map(|e| format!("The change was made, but it couldn't be added to the journal: {e}"))
+        });
+        Ok(ApplyReport { schema_version: SCHEMA_VERSION, plan_id: plan.plan_id, steps, needs_deploy, journal_problem })
     }
 }
 
@@ -644,16 +685,22 @@ mod tests {
             .unwrap();
         assert!(plan.steps.iter().all(|s| s.changes_something), "{:?}", plan.steps);
         assert_eq!(plan.preconditions.len(), 3, "config.json, C's manifest and settings.json");
-        let report = engine.apply_plan(&game, &plan.plan_id).unwrap();
+        let report = engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
         assert!(report.needs_deploy);
         assert_eq!(engine.current_setup(&game).unwrap().order, ["C", "A"]);
         assert_eq!(engine.kind_overrides().get("A"), Some(&ModKind::Sound));
-        assert_eq!(engine.apply_plan(&game, &plan.plan_id).unwrap_err().code, ErrorCode::PlanNotFound);
+        assert_eq!(
+            engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap_err().code,
+            ErrorCode::PlanNotFound
+        );
 
         // A change made after planning makes the plan stale.
         let plan = engine.plan(&game, vec![Change::SetEnabled { mod_id: "B".into(), enabled: true }]).unwrap();
         engine.set_enabled(&game, "A", false).unwrap();
-        assert_eq!(engine.apply_plan(&game, &plan.plan_id).unwrap_err().code, ErrorCode::ConfigChangedMeanwhile);
+        assert_eq!(
+            engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap_err().code,
+            ErrorCode::ConfigChangedMeanwhile
+        );
         assert!(!engine.current_setup(&game).unwrap().order.contains(&"B".to_string()));
     }
 
@@ -732,7 +779,7 @@ mod tests {
              { name: 'Q', type: 'select', group: 'G' }] }",
         )
         .unwrap();
-        let err = engine.apply_plan(&game, &plan.plan_id).unwrap_err();
+        let err = engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap_err();
         assert_eq!(err.code, ErrorCode::ConfigChangedMeanwhile);
 
         // A type change with unreadable settings is refused when planning.
@@ -785,7 +832,7 @@ mod tests {
             "{ id: 'A', name: 'A mod', loadAfter: ['B'] }",
         )
         .unwrap();
-        let err = engine.apply_plan(&game, &plan.plan_id).unwrap_err();
+        let err = engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap_err();
         assert_eq!(err.code, ErrorCode::ConfigChangedMeanwhile);
     }
 
@@ -812,7 +859,7 @@ mod tests {
             "{}",
             plan.steps[1].description
         );
-        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
         assert_eq!(engine.current_setup(&game).unwrap().order, ["B", "A"]);
     }
 
@@ -838,7 +885,7 @@ mod tests {
             .unwrap();
         let placed = engine.current_setup(&game).unwrap().order;
         assert_eq!(placed, ["A"], "planning changed nothing");
-        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
         let order = engine.current_setup(&game).unwrap().order;
         let c = order.iter().position(|m| m == "C").unwrap();
         let described: usize = plan.steps[1]
@@ -873,7 +920,7 @@ mod tests {
                 ],
             )
             .unwrap();
-        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
         let order = engine.current_setup(&game).unwrap().order;
         let described: usize = plan.steps[2]
             .description
@@ -899,7 +946,7 @@ mod tests {
         let set = || Change::SetOptions { mod_id: "A".into(), chosen: vec!["X".into()] };
         let plan = engine.plan(&game, vec![set()]).unwrap();
         assert!(plan.steps[0].changes_something, "storing it changes what Deploy.exe applies");
-        assert!(engine.apply_plan(&game, &plan.plan_id).unwrap().steps[0].changes_something);
+        assert!(engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap().steps[0].changes_something);
         // Stored now, the same choice is already so.
         assert!(!engine.plan(&game, vec![set()]).unwrap().steps[0].changes_something);
     }
@@ -931,14 +978,47 @@ mod tests {
     }
 
     #[test]
+    fn the_journal_keeps_a_failure_beside_the_steps_applied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let step = PlanStep { description: "Turn B on".into(), changes_something: true };
+        let e = VmmError::new(ErrorCode::SaveFailed, "disk full");
+        journal::append(tmp.path(), &Caller::Cli, "g", "0123456789abcdef", None, std::slice::from_ref(&step), None)
+            .unwrap();
+        journal::append(
+            tmp.path(),
+            &Caller::Mcp { client: "x".into() },
+            "g",
+            "0123456789abcdef",
+            Some("why"),
+            &[step],
+            Some(&e),
+        )
+        .unwrap();
+        let entries = journal::read(tmp.path());
+        assert!(entries[0].get("failed").is_none());
+        assert_eq!(entries[1]["failed"]["code"], "save.failed");
+        assert_eq!(
+            (entries[1]["steps"][0]["description"].as_str(), entries[1]["request"].as_str()),
+            (Some("Turn B on"), Some("why"))
+        );
+    }
+
+    #[test]
     fn plan_ids_are_never_paths() {
         let (_tmp, game, engine) = setup();
         for id in ["../settings", "0123456789ABCDEF", "", "0123456789abcdef0"] {
-            assert_eq!(engine.apply_plan(&game, id).unwrap_err().code, ErrorCode::PlanNotFound, "{id}");
+            assert_eq!(
+                engine.apply_plan(&game, id, &Caller::Cli, None).unwrap_err().code,
+                ErrorCode::PlanNotFound,
+                "{id}"
+            );
         }
         let other = GameInstall { store: Store::Folder, root: PathBuf::from("C:\\elsewhere") };
         let plan = engine.plan(&game, vec![Change::SetEnabled { mod_id: "B".into(), enabled: true }]).unwrap();
-        assert_eq!(engine.apply_plan(&other, &plan.plan_id).unwrap_err().code, ErrorCode::GameNotFound);
+        assert_eq!(
+            engine.apply_plan(&other, &plan.plan_id, &Caller::Cli, None).unwrap_err().code,
+            ErrorCode::GameNotFound
+        );
     }
 
     #[test]
@@ -949,7 +1029,10 @@ mod tests {
         let mut old = plan.clone();
         old.expires_at_ms = 1;
         std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert_eq!(engine.apply_plan(&game, &plan.plan_id).unwrap_err().code, ErrorCode::PlanExpired);
+        assert_eq!(
+            engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap_err().code,
+            ErrorCode::PlanExpired
+        );
         assert!(!path.exists());
     }
 }

@@ -147,6 +147,13 @@
       "hint": "Plan the change again and apply the new plan.",
       "retryable": false,
       "exitCode": 3
+    },
+    {
+      "code": "ai.changes_off",
+      "meaning": "AI tools may read and plan, but changes from them are turned off in Settings.",
+      "hint": "Tell the user. They can turn on \"Let AI tools make changes\" in Vaexil Mod Manager's Settings, or make the change themselves.",
+      "retryable": false,
+      "exitCode": 3
     }
   ]
 }

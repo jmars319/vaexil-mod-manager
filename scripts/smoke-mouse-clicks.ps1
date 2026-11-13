@@ -323,6 +323,17 @@ try {
     } else {
         Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Find-Control $window 'Take the command line out of my PATH'))
     }
+    # "Let AI tools make changes" is off until switched on, and is kept in
+    # the app's settings.json (here the test's throwaway data folder).
+    $settingsFile = Join-Path $data 'settings.json'
+    $aiOn = { (Test-Path $settingsFile) -and ((Get-Content $settingsFile -Raw) -match '"aiChanges":\s*true') }
+    Check 'settings: AI changes are off at first' (-not (& $aiOn))
+    Click $window (Find-Control $window 'Let AI tools make changes')
+    Start-Sleep -Milliseconds 500
+    Check 'settings: the switch allows AI changes' (& $aiOn)
+    Click $window (Find-Control $window 'Let AI tools make changes')
+    Start-Sleep -Milliseconds 500
+    Check 'settings: a second click turns them off' (-not (& $aiOn))
     Click $window (Find-Control $window 'Close settings')
     Start-Sleep -Milliseconds 400
 } finally {
