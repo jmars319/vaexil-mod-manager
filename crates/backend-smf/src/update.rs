@@ -85,6 +85,10 @@ pub fn read_releases(json: &str, installed: &str) -> Result<UpdateCheck, VmmErro
         )
     })?;
     let list: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| bad(e.to_string()))?;
+    // The list is the newest releases only. If it doesn't reach back to the
+    // installed one, a release in between may say it can't be applied
+    // automatically, so the update is held.
+    let covered = list.iter().filter_map(|r| parse_version(r["tag_name"].as_str()?)).any(|v| v <= installed);
     let mut newer: Vec<(semver::Version, &serde_json::Value)> = list
         .iter()
         .filter(|r| !r["draft"].as_bool().unwrap_or(false) && !r["prerelease"].as_bool().unwrap_or(false))
@@ -92,7 +96,8 @@ pub fn read_releases(json: &str, installed: &str) -> Result<UpdateCheck, VmmErro
         .filter(|(v, _)| *v > installed)
         .collect();
     newer.sort_by(|a, b| b.0.cmp(&a.0));
-    let held = newer.iter().any(|(_, r)| r["body"].as_str().unwrap_or_default().contains(HELD_MARKER));
+    let held = (!covered && !newer.is_empty())
+        || newer.iter().any(|(_, r)| r["body"].as_str().unwrap_or_default().contains(HELD_MARKER));
     let latest = match newer.first() {
         None => None,
         Some((_, r)) => {
@@ -260,10 +265,17 @@ mod tests {
         let r = c.latest.unwrap();
         assert_eq!((r.tag.as_str(), r.sha256.as_deref()), ("2.33.46", Some("abc")));
         assert!(!c.held);
-        let held = serde_json::json!([release("2.34.0", "big change"), release("2.33.46", HELD_MARKER)]);
+        let held = serde_json::json!([
+            release("2.34.0", "big change"),
+            release("2.33.46", HELD_MARKER),
+            release("2.33.45", "")
+        ]);
         assert!(read_releases(&held.to_string(), "2.33.45").unwrap().held);
         // A hold on an older release doesn't matter.
         assert!(!read_releases(&held.to_string(), "2.33.46").unwrap().held);
+        // A list that doesn't reach back to the installed release may hide a hold.
+        let c = read_releases(&list.to_string(), "2.33.40").unwrap();
+        assert!(c.held && c.latest.is_some());
         assert!(read_releases(&list.to_string(), "2.33.46").unwrap().latest.is_none());
         let mut pre = release("2.40.0", "");
         pre["prerelease"] = serde_json::json!(true);

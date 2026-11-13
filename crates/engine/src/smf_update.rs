@@ -116,7 +116,7 @@ pub fn plan(base: UpdateBase) -> Result<Option<UpdateJob>, VmmError> {
         return Err(VmmError::new(
             ErrorCode::SmfUpdateHeld,
             format!(
-                "SMF's release notes say a newer release ({}) can't be applied automatically. Nothing was changed.",
+                "A newer SMF ({}) can't be applied automatically: its release notes say so, or the installed SMF is too old to check them all. Update it by hand. Nothing was changed.",
                 found.newer.join(", ")
             ),
         ));

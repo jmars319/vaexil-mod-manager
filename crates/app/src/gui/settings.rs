@@ -55,7 +55,7 @@ fn show_smf(ui: &AppWindow, state: &State) {
             format!("Installed: {i}. SMF {l} is available ({} MB).{}", s.size_bytes >> 20, checked.unwrap_or_default())
         }
         (Some(i), Some(l), true) => format!(
-            "Installed: {i}. SMF {l} is out, but its notes say it can't be applied automatically; update it by hand.{}",
+            "Installed: {i}. SMF {l} is out, but it can't be applied automatically (its release notes say so, or this SMF is too old to check them all); update it by hand.{}",
             checked.unwrap_or_default()
         ),
         (Some(i), None, _) => match checked {
@@ -280,8 +280,27 @@ fn in_background<T: Send + 'static>(
     });
 }
 
+/// Whether an SMF update is running in this window. Closing the window
+/// would end the process mid-copy, so it stays open until the update ends.
+static UPDATE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
     let ss = ui.global::<SettingsState>();
+    {
+        let weak = ui.as_weak();
+        ui.window().on_close_requested(move || {
+            if !UPDATE_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+                return slint::CloseRequestResponse::HideWindow;
+            }
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<Ui>().set_sheet("settings".into());
+                let ss = ui.global::<SettingsState>();
+                ss.set_smf_note("SMF is being updated. The window closes once the update has finished.".into());
+                ss.set_smf_note_error(true);
+            }
+            slint::CloseRequestResponse::KeepWindowShown
+        });
+    }
     let note = |ui: &AppWindow, text: String, error: bool| {
         let ss = ui.global::<SettingsState>();
         ss.set_smf_note(text.into());
@@ -353,6 +372,7 @@ fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
                 }
             };
             ss.set_smf_busy(true);
+            UPDATE_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
             note(&ui, "Asking SMF's GitHub page for the newest release…".into(), false);
             let state = state.clone();
             in_background(
@@ -365,6 +385,7 @@ fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
                 },
                 move |ui, r| {
                     ui.global::<SettingsState>().set_smf_busy(false);
+                    UPDATE_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
                     if let Some(game) = state.game.borrow().clone() {
                         state.engine.note_smf_update(&game, &r);
                     }
