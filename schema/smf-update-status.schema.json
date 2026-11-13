@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "installed": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The installed version, when it is one this app can name."
+    },
+    "latest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The newest newer release, if any."
+    },
+    "held": {
+      "type": "boolean",
+      "description": "Whether a newer release says it can't be applied automatically."
+    },
+    "sizeBytes": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0,
+      "description": "The download's size in bytes."
+    },
+    "checkedAtMs": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0,
+      "description": "When SMF's releases were last checked; absent when never."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "held",
+    "sizeBytes"
+  ],
+  "description": "Whether a newer SMF is out, from the last check of SMF's GitHub releases.",
+  "title": "SmfUpdateStatus",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

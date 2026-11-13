@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "updated": {
+      "type": "boolean"
+    },
+    "from": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "updated",
+    "message"
+  ],
+  "description": "`vmm smf update`: what happened.",
+  "title": "SmfUpdateResult",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

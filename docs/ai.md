@@ -26,6 +26,7 @@ Each line is that app's own command for adding a server, and it changes only tha
 | `get_logs` | The newest events: every change, who made it (`gui`, `cli` or `mcp:<app>`), and every failure with its code. | No |
 | `get_deploy_report` | The last deploy, read from SMF's output: result, duration, stages, warnings grouped by kind and mod (each counted once), errors. | No |
 | `diagnose` | All of it at once for working out a problem, with paths in the user folder written as `~`. | No |
+| `get_smf_update` | Whether a newer SMF is out, from the last check. Makes no network call. | No |
 | `get_setups` | Saved setups, and the compatibility pass under way: baseline, each batch and its result, and the mods that can go into the next batch. | No |
 | `plan_change` | Checks the changes you asked for and returns a plan: its steps in plain words and a `planId`. | No (it saves the plan for 10 minutes) |
 | `apply_plan` | Applies a plan once, if nothing it depends on has changed since. | Yes |

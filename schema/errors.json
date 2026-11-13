@@ -175,6 +175,34 @@
       "hint": "Check that Steam is installed and you have signed in on this PC at least once.",
       "retryable": false,
       "exitCode": 3
+    },
+    {
+      "code": "network.failed",
+      "meaning": "A network request failed, or its answer can't be read.",
+      "hint": "Check the internet connection, then try again.",
+      "retryable": true,
+      "exitCode": 10
+    },
+    {
+      "code": "download.mismatch",
+      "meaning": "A download doesn't match the checksum its source gave, or isn't a readable archive.",
+      "hint": "Try again; if it keeps happening, the release may have changed. Nothing was installed.",
+      "retryable": false,
+      "exitCode": 3
+    },
+    {
+      "code": "smf.update_held",
+      "meaning": "SMF's update can't be applied automatically.",
+      "hint": "Read SMF's release notes and update it by hand, as SMF's own Mod Manager would ask you to.",
+      "retryable": false,
+      "exitCode": 3
+    },
+    {
+      "code": "smf.updating",
+      "meaning": "SMF is being updated.",
+      "hint": "Wait for the update to finish, then try again.",
+      "retryable": true,
+      "exitCode": 5
     }
   ]
 }

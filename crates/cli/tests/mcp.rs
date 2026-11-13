@@ -118,6 +118,7 @@ fn an_ai_client_can_read_everything_and_change_only_when_allowed() {
             "get_logs",
             "get_mod",
             "get_setups",
+            "get_smf_update",
             "get_status",
             "list_error_codes",
             "list_games",

@@ -44,6 +44,17 @@ export global SettingsState {
     callback steam-confirm();
     callback steam-cancel();
     callback steam-disconnect();
+    // Simple Mod Framework updates.
+    in property <string> smf-status;
+    in property <bool> smf-can-update;
+    in property <bool> smf-busy;
+    in property <bool> smf-confirming;
+    in property <string> smf-note;
+    in property <bool> smf-note-error;
+    callback smf-check();
+    callback smf-update();
+    callback smf-confirm();
+    callback smf-cancel();
 }
 
 component CommandLine inherits VerticalLayout {
@@ -93,6 +104,56 @@ export component SettingsSheet inherits Sheet {
             width: body.visible-width;
             padding-right: 10px;
             spacing: 14px;
+            VerticalLayout {
+                spacing: 8px;
+                FieldLabel { text: "Simple Mod Framework"; }
+                Text {
+                    text: SettingsState.smf-status;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                if SettingsState.smf-confirming: VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "This downloads SMF's Release.zip from its GitHub page, checks it against the checksum GitHub gives, and installs it the way SMF's own updater does. Your mods, config.json and SMF's clean copies stay, and a copy of every replaced file is kept. HITMAN and SMF's own Mod Manager must be closed. Deploy afterwards to use it.";
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        Button {
+                            text: "Cancel";
+                            accessible-label: "Cancel updating SMF";
+                            clicked => { SettingsState.smf-cancel(); }
+                        }
+                        Button {
+                            text: "Update SMF";
+                            primary: true;
+                            clicked => { SettingsState.smf-confirm(); }
+                        }
+                    }
+                }
+                if !SettingsState.smf-confirming && !SettingsState.smf-busy: HorizontalLayout {
+                    alignment: start;
+                    spacing: 8px;
+                    Button {
+                        text: "Check for updates";
+                        accessible-label: "Check for SMF updates";
+                        clicked => { SettingsState.smf-check(); }
+                    }
+                    if SettingsState.smf-can-update: Button {
+                        text: "Update SMF…";
+                        accessible-label: "Update SMF";
+                        clicked => { SettingsState.smf-update(); }
+                    }
+                }
+                if SettingsState.smf-note != "": Text {
+                    text: SettingsState.smf-note;
+                    font-size: 12px;
+                    color: SettingsState.smf-note-error ? Theme.danger : (SettingsState.smf-busy ? Theme.secondary-text : Theme.ready);
+                    wrap: word-wrap;
+                }
+            }
+
             VerticalLayout {
                 spacing: 6px;
                 FieldLabel { text: "Command line"; }

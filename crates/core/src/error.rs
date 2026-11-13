@@ -59,10 +59,19 @@ pub enum ErrorCode {
     SteamRunning,
     /// Steam, a signed-in account, or its settings can't be found or read.
     SteamUnavailable,
+    /// A network request failed or got an answer that can't be read.
+    NetworkFailed,
+    /// A download didn't match the checksum its source gave, or isn't a
+    /// readable archive.
+    DownloadMismatch,
+    /// The framework's update can't be applied automatically.
+    SmfUpdateHeld,
+    /// The framework is being updated.
+    SmfUpdating,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 25] = [
+    pub const ALL: [ErrorCode; 29] = [
         ErrorCode::GameNotFound,
         ErrorCode::FrameworkMissing,
         ErrorCode::ConfigUnreadable,
@@ -88,6 +97,10 @@ impl ErrorCode {
         ErrorCode::DeployFailed,
         ErrorCode::SteamRunning,
         ErrorCode::SteamUnavailable,
+        ErrorCode::NetworkFailed,
+        ErrorCode::DownloadMismatch,
+        ErrorCode::SmfUpdateHeld,
+        ErrorCode::SmfUpdating,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -117,6 +130,10 @@ impl ErrorCode {
             ErrorCode::DeployFailed => "deploy.failed",
             ErrorCode::SteamRunning => "steam.running",
             ErrorCode::SteamUnavailable => "steam.unavailable",
+            ErrorCode::NetworkFailed => "network.failed",
+            ErrorCode::DownloadMismatch => "download.mismatch",
+            ErrorCode::SmfUpdateHeld => "smf.update_held",
+            ErrorCode::SmfUpdating => "smf.updating",
         }
     }
 
@@ -148,6 +165,12 @@ impl ErrorCode {
             ErrorCode::DeployFailed => "The framework's deploy ran and reported failure.",
             ErrorCode::SteamRunning => "Steam is running, so its settings can't be changed.",
             ErrorCode::SteamUnavailable => "Steam, a signed-in Steam account, or its settings can't be found or read.",
+            ErrorCode::NetworkFailed => "A network request failed, or its answer can't be read.",
+            ErrorCode::DownloadMismatch => {
+                "A download doesn't match the checksum its source gave, or isn't a readable archive."
+            }
+            ErrorCode::SmfUpdateHeld => "SMF's update can't be applied automatically.",
+            ErrorCode::SmfUpdating => "SMF is being updated.",
         }
     }
 
@@ -193,6 +216,14 @@ impl ErrorCode {
             ErrorCode::SteamUnavailable => {
                 "Check that Steam is installed and you have signed in on this PC at least once."
             }
+            ErrorCode::NetworkFailed => "Check the internet connection, then try again.",
+            ErrorCode::DownloadMismatch => {
+                "Try again; if it keeps happening, the release may have changed. Nothing was installed."
+            }
+            ErrorCode::SmfUpdateHeld => {
+                "Read SMF's release notes and update it by hand, as SMF's own Mod Manager would ask you to."
+            }
+            ErrorCode::SmfUpdating => "Wait for the update to finish, then try again.",
         }
     }
 
@@ -203,9 +234,9 @@ impl ErrorCode {
         match self {
             ErrorCode::Usage => 2,
             ErrorCode::ConfigChangedMeanwhile => 4,
-            ErrorCode::GameRunning | ErrorCode::DeployRunning | ErrorCode::SteamRunning => 5,
+            ErrorCode::GameRunning | ErrorCode::DeployRunning | ErrorCode::SteamRunning | ErrorCode::SmfUpdating => 5,
             ErrorCode::DeployFailed => 6,
-            ErrorCode::SaveFailed | ErrorCode::Io => 10,
+            ErrorCode::SaveFailed | ErrorCode::Io | ErrorCode::NetworkFailed => 10,
             _ => 3,
         }
     }
@@ -219,6 +250,8 @@ impl ErrorCode {
                 | ErrorCode::GameRunning
                 | ErrorCode::DeployRunning
                 | ErrorCode::SteamRunning
+                | ErrorCode::NetworkFailed
+                | ErrorCode::SmfUpdating
         )
     }
 }
