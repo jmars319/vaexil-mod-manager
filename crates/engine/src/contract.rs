@@ -426,6 +426,12 @@ impl Engine {
         Ok(steps)
     }
 
+    /// The SHA-256 of the backend's settings file (SMF's `config.json`), to
+    /// tell whether a step that writes it as a whole changed anything.
+    fn config_hash(&self, game: &GameInstall) -> Option<String> {
+        self.backend().state_files(game, &[]).first().and_then(|p| sha256_of(p).ok().flatten())
+    }
+
     /// The setups and pass as saved now, read again from disk.
     fn fresh_setups(&self) -> Result<setups::Setups, VmmError> {
         if self.data_dir().is_none() {
@@ -460,9 +466,18 @@ impl Engine {
                 let s = &setups.saved[self.setup_index(name)?];
                 let usable = |id: &String| mods.iter().any(|m| m.id == *id && m.problem.is_none());
                 let (kept, gone): (Vec<String>, Vec<String>) = s.setup.order.iter().cloned().partition(usable);
+                // Switching writes the setup's options, and a mod with none
+                // saved or stored gets its defaults written, as turning it on
+                // does: either way config.json changes.
                 let now = self.current_setup(game)?;
-                let changed = now.order != kept
-                    || kept.iter().any(|id| s.setup.options.get(id).is_some_and(|o| now.options.get(id) != Some(o)));
+                let stored = self.backend().stored_options(game)?;
+                let mut changed = now.order != kept;
+                for id in &kept {
+                    changed |= match s.setup.options.get(id) {
+                        Some(o) => stored.get(id) != Some(o),
+                        None => self.backend().enable_defaults(game, id, &kept)?.is_some(),
+                    };
+                }
                 let left_out = if gone.is_empty() {
                     String::new()
                 } else {
@@ -830,20 +845,21 @@ impl Engine {
                         })
                         .and_then(|sorted| self.set_load_order(game, &sorted))
                 }
-                Change::UseSetup { name } => self
-                    .setup_index(name)
-                    .and_then(|i| self.use_setup(game, i))
-                    .map(|_| plan.steps[i].changes_something),
+                Change::UseSetup { name } => {
+                    let before = self.config_hash(game);
+                    self.setup_index(name)
+                        .and_then(|i| self.use_setup(game, i))
+                        .map(|_| self.config_hash(game) != before)
+                }
                 Change::SaveSetup { name } => self.save_setup(game, name).map(|()| true),
                 Change::DeleteSetup { name } => {
                     self.setup_index(name).and_then(|i| self.delete_setup(i)).map(|()| true)
                 }
-                Change::StartPass { from_current } => {
-                    self.start_pass(game, *from_current).map(|()| plan.steps[i].changes_something)
-                }
+                Change::StartPass { from_current } => self.start_pass(game, *from_current).map(|()| true),
                 Change::TryBatch { name, mods } => self.begin_batch(game, name, mods.clone()).map(|()| true),
                 Change::MarkBatch { good, notes } => {
-                    self.mark_batch(game, *good, notes).map(|()| plan.steps[i].changes_something)
+                    let before = self.config_hash(game);
+                    self.mark_batch(game, *good, notes).map(|()| *good || self.config_hash(game) != before)
                 }
                 Change::EndPass {} => self.end_pass().map(|()| true),
             };
@@ -1474,6 +1490,27 @@ mod tests {
         run(&engine, &game, Change::SaveSetup { name: "Three".into() });
         let names: Vec<String> = engine.setups().unwrap().saved.into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["One", "Two", "Three"]);
+    }
+
+    #[test]
+    fn switching_to_a_setup_that_fills_in_defaults_is_a_change() {
+        let (_tmp, game, engine) = setup();
+        // A is on with an option it has never had stored; the setup is A alone.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', options: [{ name: 'X', type: 'checkbox', enabledByDefault: true }] }",
+        )
+        .unwrap();
+        let mut saved = engine.setups().unwrap();
+        saved.put("Bare", vmm_core::backend::Setup { order: vec!["A".into()], options: Default::default() }).unwrap();
+        saved.save(engine.data_dir().unwrap()).unwrap();
+        let plan = engine.plan(&game, vec![Change::UseSetup { name: "Bare".into() }]).unwrap();
+        assert!(plan.steps[0].changes_something, "the defaults get stored");
+        let report = engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
+        assert!(report.steps[0].changes_something && report.needs_deploy);
+        // Now stored, switching again changes nothing.
+        let plan = engine.plan(&game, vec![Change::UseSetup { name: "Bare".into() }]).unwrap();
+        assert!(!plan.steps[0].changes_something);
     }
 
     #[test]
