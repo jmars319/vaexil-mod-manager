@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "End the compatibility pass and keep the mods as they are",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": false,
+  "journalProblem": null
+}

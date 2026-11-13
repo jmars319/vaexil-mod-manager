@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "Try the batch “First”: B, C on top of the baseline; the load order becomes: B, C",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": true,
+  "journalProblem": null
+}

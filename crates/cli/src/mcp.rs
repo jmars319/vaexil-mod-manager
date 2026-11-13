@@ -19,8 +19,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vmm_core::error::VmmError;
 use vmm_core::schema::{
-    ApplyReport, Change, Diagnosis, ErrorCodeList, ErrorReport, GameList, LastDeploy, LogList, ModDetail, ModList,
-    OrderReport, Plan, SCHEMA_VERSION, StatusReport,
+    ApplyReport, Change, DeployStatus, Diagnosis, ErrorCodeList, ErrorReport, GameList, LastDeploy, LogList, ModDetail,
+    ModList, OrderReport, Plan, SCHEMA_VERSION, SetupList, StatusReport,
 };
 use vmm_engine::Engine;
 use vmm_engine::journal::Caller;
@@ -36,6 +36,11 @@ list_error_codes, get_logs, get_deploy_report, diagnose. For \"what went wrong\"
 change in so many words, such as \"turn off every mod\" or \"enable these three\".
 - To change something: call plan_change, show the user the plan's steps, then call apply_plan with the \
 planId and the user's request in their own words. A plan expires after 10 minutes and is used once.
+- Changes include turning mods on or off, options, types, the load order, auto-sort, setups (use, save, delete) \
+and the compatibility pass (startPass, tryBatch, markBatch, endPass). A setup or pass step is planned on its own.
+- For a compatibility pass after a game update: start the pass (usually from every mod off), try small batches \
+the user picks, and after the user has deployed and played, mark each batch good or bad as the user says.
+- start_deploy runs only when the user asks for a deploy; follow it with get_deploy_status.
 - If apply_plan fails with ai.changes_off, the user has not allowed changes from AI tools. Tell them; don't \
 look for another way.
 - Changes reach the game only after a deploy, which the user starts in Vaexil Mod Manager.
@@ -53,6 +58,15 @@ pub struct ModArgs {
     /// The mod's id, as list_mods gives it.
     #[serde(rename = "mod")]
     pub mod_id: String,
+    #[serde(default)]
+    pub game: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DeployArgs {
+    /// What the user asked for, in their own words. Required: a deploy
+    /// rewrites the game's patch files.
+    pub request: String,
     #[serde(default)]
     pub game: Option<String>,
 }
@@ -111,6 +125,8 @@ fn client_name(peer: &Peer<RoleServer>) -> String {
 #[derive(Clone)]
 pub struct Vmm {
     tool_router: ToolRouter<Self>,
+    /// A deploy started here, which outlives the call that started it.
+    progress: vmm_engine::deploy::Shared,
 }
 
 impl Default for Vmm {
@@ -122,7 +138,7 @@ impl Default for Vmm {
 #[tool_router(router = tool_router)]
 impl Vmm {
     pub fn new() -> Self {
-        Self { tool_router: Self::tool_router() }
+        Self { tool_router: Self::tool_router(), progress: Default::default() }
     }
 
     #[tool(
@@ -228,6 +244,54 @@ impl Vmm {
             Err(_) => None,
         };
         result(Ok::<_, VmmError>(e.diagnose(game.as_ref())))
+    }
+
+    #[tool(
+        description = "Saved setups (each a set of mods on, in order, with options) and the compatibility pass \
+                       under way: its baseline, each batch tried with its result, and the mods that can go into \
+                       the next batch.",
+        output_schema = schema_for_output::<SetupList>(),
+        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn get_setups(&self, Parameters(a): Parameters<GameArgs>) -> Result<CallToolResult, McpError> {
+        let (e, folder) = engine_for(&a.game);
+        let game = e.pick_game(folder.as_deref()).ok();
+        result(e.setup_list(game.as_ref()))
+    }
+
+    #[tool(
+        description = "Starts SMF's Deploy.exe, which puts the mods into the game; it can take many minutes. Only \
+                       when the user asked for a deploy; pass their request. Refused (ai.changes_off) unless the \
+                       user allows changes from AI tools in Settings, and while the game or a deploy is running. \
+                       Follow it with get_deploy_status.",
+        output_schema = schema_for_output::<DeployStatus>(),
+        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false)
+    )]
+    async fn start_deploy(
+        &self,
+        Parameters(a): Parameters<DeployArgs>,
+        peer: Peer<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let caller = Caller::Mcp { client: client_name(&peer) };
+        let (mut e, folder) = engine_as(&a.game, caller.clone());
+        e.share_progress(self.progress.clone());
+        result(
+            e.pick_game(folder.as_deref())
+                .and_then(|g| e.start_deploy_as(&g, &caller, Some(&a.request)).map(|()| e.deploy_status(Some(&g)))),
+        )
+    }
+
+    #[tool(
+        description = "Whether the deploy started with start_deploy is still running, its latest line, and once it \
+                       has finished, its report (as get_deploy_report).",
+        output_schema = schema_for_output::<DeployStatus>(),
+        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
+    )]
+    async fn get_deploy_status(&self, Parameters(a): Parameters<GameArgs>) -> Result<CallToolResult, McpError> {
+        let (mut e, folder) = engine_for(&a.game);
+        e.share_progress(self.progress.clone());
+        let game = e.pick_game(folder.as_deref()).ok();
+        result(Ok::<_, VmmError>(e.deploy_status(game.as_ref())))
     }
 
     #[tool(

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "Save the mods that are on now (A) as the setup “Just A”",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": false,
+  "journalProblem": null
+}

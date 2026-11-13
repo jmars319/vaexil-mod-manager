@@ -53,10 +53,12 @@ pub enum ErrorCode {
     /// An AI tool tried to apply a change while Settings' "Let AI tools make
     /// changes" is off.
     AiChangesOff,
+    /// The framework's deploy ran and reported failure.
+    DeployFailed,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 22] = [
+    pub const ALL: [ErrorCode; 23] = [
         ErrorCode::GameNotFound,
         ErrorCode::FrameworkMissing,
         ErrorCode::ConfigUnreadable,
@@ -79,6 +81,7 @@ impl ErrorCode {
         ErrorCode::PlanNotFound,
         ErrorCode::PlanExpired,
         ErrorCode::AiChangesOff,
+        ErrorCode::DeployFailed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -105,6 +108,7 @@ impl ErrorCode {
             ErrorCode::PlanNotFound => "plan.not_found",
             ErrorCode::PlanExpired => "plan.expired",
             ErrorCode::AiChangesOff => "ai.changes_off",
+            ErrorCode::DeployFailed => "deploy.failed",
         }
     }
 
@@ -133,6 +137,7 @@ impl ErrorCode {
             ErrorCode::PlanNotFound => "No plan has that id, or it was already applied.",
             ErrorCode::PlanExpired => "The plan is more than 10 minutes old.",
             ErrorCode::AiChangesOff => "AI tools may read and plan, but changes from them are turned off in Settings.",
+            ErrorCode::DeployFailed => "The framework's deploy ran and reported failure.",
         }
     }
 
@@ -171,16 +176,21 @@ impl ErrorCode {
             ErrorCode::AiChangesOff => {
                 "Tell the user. They can turn on \"Let AI tools make changes\" in Vaexil Mod Manager's Settings, or make the change themselves."
             }
+            ErrorCode::DeployFailed => {
+                "Read the deploy report (vmm deploy-report): its errors and the log name the mod or file that failed."
+            }
         }
     }
 
     /// The exit code `vmm` uses: 2 bad usage, 3 refused by a rule, 4 changed
-    /// meanwhile, 5 the game or a deploy is running, 10 unexpected.
+    /// meanwhile, 5 the game or a deploy is running, 6 the deploy ran and
+    /// failed, 10 unexpected.
     pub fn exit_code(self) -> i32 {
         match self {
             ErrorCode::Usage => 2,
             ErrorCode::ConfigChangedMeanwhile => 4,
             ErrorCode::GameRunning | ErrorCode::DeployRunning => 5,
+            ErrorCode::DeployFailed => 6,
             ErrorCode::SaveFailed | ErrorCode::Io => 10,
             _ => 3,
         }

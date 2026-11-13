@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "Start a compatibility pass from every mod off (turns off: A)",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": true,
+  "journalProblem": null
+}

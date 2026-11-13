@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "game": "<tmp>/game",
+  "changes": [
+    {
+      "op": "endPass"
+    }
+  ],
+  "steps": [
+    {
+      "description": "End the compatibility pass and keep the mods as they are",
+      "changesSomething": true
+    }
+  ],
+  "preconditions": [
+    {
+      "path": "<tmp>/game/Simple Mod Framework/config.json",
+      "sha256": "<sha256>"
+    },
+    {
+      "path": "<tmp>/data/setups.json",
+      "sha256": "<sha256>"
+    }
+  ],
+  "createdAtMs": "<createdAtMs>",
+  "expiresAtMs": "<expiresAtMs>"
+}

@@ -1,0 +1,135 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "setups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SetupView"
+      }
+    },
+    "pass": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PassView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The compatibility pass under way, if any."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "setups"
+  ],
+  "title": "SetupList",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "SetupView": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mod ids, first to last."
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Chosen options by mod id."
+        },
+        "inUse": {
+          "type": "boolean",
+          "description": "Whether the mods on now are exactly this setup's, in its order."
+        }
+      },
+      "required": [
+        "name",
+        "order",
+        "options",
+        "inUse"
+      ],
+      "description": "A saved setup."
+    },
+    "PassView": {
+      "type": "object",
+      "properties": {
+        "baseline": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "batches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BatchView"
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mods that can go into the next batch: installed, readable, not in the\nbaseline."
+        }
+      },
+      "required": [
+        "baseline",
+        "batches",
+        "candidates"
+      ],
+      "description": "A compatibility pass: the known-good baseline and each batch tried."
+    },
+    "BatchView": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "state": {
+          "$ref": "#/$defs/BatchState"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "mods",
+        "state",
+        "notes"
+      ]
+    },
+    "BatchState": {
+      "type": "string",
+      "enum": [
+        "testing",
+        "good",
+        "bad"
+      ]
+    }
+  }
+}

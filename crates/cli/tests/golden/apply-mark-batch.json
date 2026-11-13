@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "Mark the batch “First” good: the baseline becomes: B, C",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": false,
+  "journalProblem": null
+}

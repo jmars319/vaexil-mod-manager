@@ -289,7 +289,13 @@ impl Engine {
 
     // Setups.
 
+    /// The saved setups and the pass, read again from disk, so a change
+    /// made by another front end (the window, `vmm`, an AI tool) is never
+    /// overwritten or acted on from a stale copy.
     pub fn setups(&self) -> Result<Setups, VmmError> {
+        if let Some(dir) = &self.data_dir {
+            *self.setups.borrow_mut() = Setups::load(dir);
+        }
         self.setups.borrow().clone()
     }
 
@@ -416,8 +422,19 @@ impl Engine {
         vmm_backend_smf::find_folder(&game.root).map(|f| vmm_backend_smf::deploy::quick_key(&f)).unwrap_or_default()
     }
 
+    /// The last finished deploy, read again from disk, so a deploy finished
+    /// by another front end (the command line, an AI tool) shows too.
     pub fn record(&self) -> deploy::Record {
+        if let Some(dir) = &self.data_dir {
+            *self.record.borrow_mut() = deploy::Record::load(dir);
+        }
         self.record.borrow().clone()
+    }
+
+    /// Shares deploy progress with other engines in this process (the MCP
+    /// server makes an engine per call, and a deploy outlives the call).
+    pub fn share_progress(&mut self, progress: deploy::Shared) {
+        self.progress = progress;
     }
 
     /// Why a deploy or Play can't start now (the game, or another deploy, is

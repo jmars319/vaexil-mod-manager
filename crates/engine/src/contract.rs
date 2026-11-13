@@ -16,13 +16,13 @@ use vmm_core::backend::{Inspection, ModEntry, ModKind, Relation, Status, Version
 use vmm_core::error::{ErrorCode, VmmError};
 use vmm_core::game::GameInstall;
 use vmm_core::schema::{
-    ApplyReport, BackendState, BackendView, BrokenRuleView, Change, DeployState, GameList, GameView, KindSource,
-    LogLevel, ModDetail, ModList, ModView, OptionView, OrderReport, Plan, PlanStep, Precondition, RelationView,
-    SCHEMA_VERSION, StatusReport,
+    ApplyReport, BackendState, BackendView, BatchState, BatchView, BrokenRuleView, Change, DeployState, DeployStatus,
+    GameList, GameView, KindSource, LogLevel, ModDetail, ModList, ModView, OptionView, OrderReport, PassView, Plan,
+    PlanStep, Precondition, RelationView, SCHEMA_VERSION, SetupList, SetupView, StatusReport,
 };
 
 use crate::journal::{self, Caller};
-use crate::{Engine, deploy, enabled_order, host, settings};
+use crate::{Engine, deploy, enabled_order, host, settings, setups};
 
 /// How long a plan can be applied for.
 pub const PLAN_LIFETIME_MS: u64 = 10 * 60 * 1000;
@@ -272,6 +272,12 @@ impl Engine {
         if changes.is_empty() {
             return Err(VmmError::new(ErrorCode::Usage, "A plan needs at least one change."));
         }
+        if changes.len() > 1 && changes.iter().any(Change::stands_alone) {
+            return Err(VmmError::new(
+                ErrorCode::Usage,
+                "A setup or compatibility pass step is planned on its own, one per plan. Nothing was changed.",
+            ));
+        }
         let inspection = self.readable(game)?;
         let mods = &inspection.mods;
         let find = |id: &str| mods.iter().find(|m| m.id == id).ok_or_else(|| no_such_mod(id));
@@ -394,10 +400,187 @@ impl Engine {
                         changes_something: changed,
                     }
                 }
+                Change::AutoSort {} => {
+                    let now = self.backend().mods_with(game, &sim.order, &chosen_by_plan)?;
+                    let sorted = vmm_core::order::auto_sort(&sim.order, &now).map_err(|stuck| {
+                        VmmError::new(
+                            ErrorCode::OrderMismatch,
+                            format!(
+                                "These mods' load rules contradict each other, so no order keeps them all: {}. \
+                                 Nothing was changed.",
+                                stuck.join(", ")
+                            ),
+                        )
+                    })?;
+                    let changed = sorted != sim.order;
+                    sim.order = sorted.clone();
+                    PlanStep {
+                        description: format!("Sort the load order by the mods' rules: {}", sorted.join(", ")),
+                        changes_something: changed,
+                    }
+                }
+                alone => self.check_alone(game, mods, &sim.order, alone)?,
             };
             steps.push(step);
         }
         Ok(steps)
+    }
+
+    /// The SHA-256 of the backend's settings file (SMF's `config.json`), to
+    /// tell whether a step that writes it as a whole changed anything.
+    fn config_hash(&self, game: &GameInstall) -> Option<String> {
+        self.backend().state_files(game, &[]).first().and_then(|p| sha256_of(p).ok().flatten())
+    }
+
+    /// The setups and pass as saved now, read again from disk.
+    fn fresh_setups(&self) -> Result<setups::Setups, VmmError> {
+        if self.data_dir().is_none() {
+            return Err(VmmError::new(ErrorCode::BackupUnavailable, "There is no folder to keep setups in."));
+        }
+        self.setups()
+    }
+
+    /// The saved setup named `name` (ignoring case), by its place in the list.
+    fn setup_index(&self, name: &str) -> Result<usize, VmmError> {
+        self.fresh_setups()?.saved.iter().position(|s| s.name.eq_ignore_ascii_case(name.trim())).ok_or_else(|| {
+            VmmError::new(ErrorCode::OptionInvalid, format!("There is no saved setup \u{201c}{}\u{201d}.", name.trim()))
+        })
+    }
+
+    /// Checks and describes a setup or pass step, which is planned alone.
+    fn check_alone(
+        &self,
+        game: &GameInstall,
+        mods: &[vmm_core::backend::ModEntry],
+        order: &[String],
+        change: &Change,
+    ) -> Result<PlanStep, VmmError> {
+        let setups = self.fresh_setups()?;
+        let no_pass =
+            || VmmError::new(ErrorCode::PassState, "There is no compatibility pass under way. Start one first.");
+        let quoted = |s: &str| format!("\u{201c}{}\u{201d}", s.trim());
+        let list = |ids: &[String]| if ids.is_empty() { "none".to_string() } else { ids.join(", ") };
+        let step = |description: String, changes_something: bool| PlanStep { description, changes_something };
+        Ok(match change {
+            Change::UseSetup { name } => {
+                let s = &setups.saved[self.setup_index(name)?];
+                let usable = |id: &String| mods.iter().any(|m| m.id == *id && m.problem.is_none());
+                let (kept, gone): (Vec<String>, Vec<String>) = s.setup.order.iter().cloned().partition(usable);
+                // Switching writes the setup's options, and a mod with none
+                // saved or stored gets its defaults written, as turning it on
+                // does: either way config.json changes.
+                let now = self.current_setup(game)?;
+                let stored = self.backend().stored_options(game)?;
+                let mut changed = now.order != kept;
+                for id in &kept {
+                    changed |= match s.setup.options.get(id) {
+                        Some(o) => stored.get(id) != Some(o),
+                        None => self.backend().enable_defaults(game, id, &kept)?.is_some(),
+                    };
+                }
+                let left_out = if gone.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (left out, no longer installed or readable: {})", gone.join(", "))
+                };
+                step(
+                    format!(
+                        "Switch to the setup {}: these mods on, in this order: {}{left_out}",
+                        quoted(&s.name),
+                        list(&kept)
+                    ),
+                    changed,
+                )
+            }
+            Change::SaveSetup { name } => {
+                if name.trim().is_empty() {
+                    return Err(VmmError::new(ErrorCode::OptionInvalid, "Give the setup a name. Nothing was changed."));
+                }
+                let replacing = setups.saved.iter().any(|s| s.name.eq_ignore_ascii_case(name.trim()));
+                let how = if replacing { ", replacing the saved one" } else { "" };
+                step(
+                    format!("Save the mods that are on now ({}) as the setup {}{how}", list(order), quoted(name)),
+                    true,
+                )
+            }
+            Change::DeleteSetup { name } => {
+                let s = &setups.saved[self.setup_index(name)?];
+                step(format!("Delete the saved setup {}", quoted(&s.name)), true)
+            }
+            Change::StartPass { from_current } => {
+                if setups.pass.is_some() {
+                    return Err(VmmError::new(
+                        ErrorCode::PassState,
+                        "A compatibility pass is already under way. End it first. Nothing was changed.",
+                    ));
+                }
+                if *from_current {
+                    step(
+                        format!("Start a compatibility pass with the mods on now as its baseline: {}", list(order)),
+                        true,
+                    )
+                } else {
+                    step(format!("Start a compatibility pass from every mod off (turns off: {})", list(order)), true)
+                }
+            }
+            Change::TryBatch { name, mods: batch } => {
+                let mut pass = setups.pass.clone().ok_or_else(no_pass)?;
+                for id in batch {
+                    let m = mods.iter().find(|m| m.id == *id).ok_or_else(|| no_such_mod(id))?;
+                    if let Some(problem) = &m.problem {
+                        return Err(VmmError::new(
+                            ErrorCode::ModUnreadable,
+                            format!("{} can't be tried. {problem}", mod_label(m)),
+                        ));
+                    }
+                }
+                pass.begin(name, batch.clone())?;
+                let target = pass.target_order(mods);
+                let label = pass.batches.last().map(|b| b.name.clone()).unwrap_or_default();
+                step(
+                    format!(
+                        "Try the batch {}: {} on top of the baseline; the load order becomes: {}",
+                        quoted(&label),
+                        list(batch),
+                        list(&target)
+                    ),
+                    true,
+                )
+            }
+            Change::MarkBatch { good, notes } => {
+                let mut pass = setups.pass.clone().ok_or_else(no_pass)?;
+                let i = pass.active().ok_or_else(|| {
+                    VmmError::new(ErrorCode::PassState, "No batch is being tried. Nothing was changed.")
+                })?;
+                let label = pass.batches[i].name.clone();
+                pass.mark(*good, order, notes)?;
+                let target = pass.target_order(mods);
+                if *good {
+                    step(
+                        format!(
+                            "Mark the batch {} good: the baseline becomes: {}",
+                            quoted(&label),
+                            list(&pass.baseline)
+                        ),
+                        true,
+                    )
+                } else {
+                    step(
+                        format!(
+                            "Mark the batch {} bad: the game goes back to the baseline: {}",
+                            quoted(&label),
+                            list(&target)
+                        ),
+                        target != order,
+                    )
+                }
+            }
+            Change::EndPass {} => {
+                setups.pass.as_ref().ok_or_else(no_pass)?;
+                step("End the compatibility pass and keep the mods as they are".into(), true)
+            }
+            other => unreachable!("{other:?} is checked in the plan's own loop"),
+        })
     }
 
     /// The files these changes depend on.
@@ -412,9 +595,36 @@ impl Engine {
                 _ => None,
             })
             .collect();
+        if let Some(c) = changes.iter().find(|c| c.stands_alone()) {
+            let setups = self.fresh_setups()?;
+            match c {
+                Change::UseSetup { name } => {
+                    if let Some(s) = setups.saved.iter().find(|s| s.name.eq_ignore_ascii_case(name.trim())) {
+                        mods.extend(s.setup.order.iter().cloned());
+                    }
+                }
+                Change::TryBatch { mods: batch, .. } => {
+                    mods.extend(batch.iter().cloned());
+                    if let Some(p) = &setups.pass {
+                        mods.extend(p.baseline.iter().cloned());
+                    }
+                }
+                Change::MarkBatch { .. } => {
+                    if let Some(p) = &setups.pass {
+                        mods.extend(p.baseline.iter().cloned());
+                    }
+                }
+                _ => {}
+            }
+        }
         mods.sort();
         mods.dedup();
         let mut files = self.backend().state_files(game, &mods);
+        if changes.iter().any(Change::stands_alone)
+            && let Some(dir) = self.data_dir()
+        {
+            files.push(setups::path(dir));
+        }
         if changes.iter().any(|c| matches!(c, Change::SetKind { .. }))
             && let Some(dir) = self.data_dir()
         {
@@ -613,7 +823,9 @@ impl Engine {
         })?;
 
         let mut steps = Vec::new();
-        let mut needs_deploy = false;
+        // Whether the game needs a deploy follows from whether the backend's
+        // settings file actually changed, whatever the steps were.
+        let config_before = self.config_hash(game);
         for (i, change) in plan.changes.iter().enumerate() {
             let result = match change {
                 Change::SetEnabled { mod_id, enabled } => self.set_enabled(game, mod_id, *enabled),
@@ -623,10 +835,38 @@ impl Engine {
                     self.set_kind(mod_id, *kind).map(|()| before != *kind)
                 }
                 Change::Reorder { order } => self.set_load_order(game, order),
+                Change::AutoSort {} => {
+                    let mods = self.inspect(game).mods;
+                    let order = enabled_order(&mods);
+                    vmm_core::order::auto_sort(&order, &mods)
+                        .map_err(|stuck| {
+                            VmmError::new(
+                                ErrorCode::OrderMismatch,
+                                format!("These mods' load rules contradict each other: {}.", stuck.join(", ")),
+                            )
+                        })
+                        .and_then(|sorted| self.set_load_order(game, &sorted))
+                }
+                Change::UseSetup { name } => {
+                    let before = self.config_hash(game);
+                    self.setup_index(name)
+                        .and_then(|i| self.use_setup(game, i))
+                        .map(|_| self.config_hash(game) != before)
+                }
+                Change::SaveSetup { name } => self.save_setup(game, name).map(|()| true),
+                Change::DeleteSetup { name } => {
+                    self.setup_index(name).and_then(|i| self.delete_setup(i)).map(|()| true)
+                }
+                Change::StartPass { from_current } => self.start_pass(game, *from_current).map(|()| true),
+                Change::TryBatch { name, mods } => self.begin_batch(game, name, mods.clone()).map(|()| true),
+                Change::MarkBatch { good, notes } => {
+                    let before = self.config_hash(game);
+                    self.mark_batch(game, *good, notes).map(|()| *good || self.config_hash(game) != before)
+                }
+                Change::EndPass {} => self.end_pass().map(|()| true),
             };
             match result {
                 Ok(changed) => {
-                    needs_deploy |= changed && !matches!(change, Change::SetKind { .. });
                     steps.push(PlanStep { description: plan.steps[i].description.clone(), changes_something: changed });
                 }
                 Err(e) if i == 0 => return Err(e),
@@ -651,13 +891,116 @@ impl Engine {
                 }
             }
         }
-        needs_deploy &= self.backend().capabilities().needs_deploy;
+        let needs_deploy = self.backend().capabilities().needs_deploy && self.config_hash(game) != config_before;
         let journal_problem = self.data_dir().and_then(|dir| {
             journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps, None)
                 .err()
                 .map(|e| format!("The change was made, but it couldn't be added to the journal: {e}"))
         });
         Ok(ApplyReport { schema_version: SCHEMA_VERSION, plan_id: plan.plan_id, steps, needs_deploy, journal_problem })
+    }
+}
+
+impl Engine {
+    /// The saved setups and the pass under way, for `vmm setups` and AI tools.
+    pub fn setup_list(&self, game: Option<&GameInstall>) -> Result<SetupList, VmmError> {
+        let saved = self.fresh_setups()?;
+        let now = game.and_then(|g| self.current_setup(g).ok());
+        let mods = game.map(|g| self.inspect(g).mods).unwrap_or_default();
+        let state = |s: setups::BatchStatus| match s {
+            setups::BatchStatus::Testing => BatchState::Testing,
+            setups::BatchStatus::Good => BatchState::Good,
+            setups::BatchStatus::Bad => BatchState::Bad,
+        };
+        Ok(SetupList {
+            schema_version: SCHEMA_VERSION,
+            setups: saved
+                .saved
+                .iter()
+                .map(|s| SetupView {
+                    name: s.name.clone(),
+                    order: s.setup.order.clone(),
+                    options: s.setup.options.clone(),
+                    in_use: now.as_ref().is_some_and(|n| n.order == s.setup.order),
+                })
+                .collect(),
+            pass: saved.pass.as_ref().map(|p| PassView {
+                baseline: p.baseline.clone(),
+                batches: p
+                    .batches
+                    .iter()
+                    .map(|b| BatchView {
+                        name: b.name.clone(),
+                        mods: b.mods.clone(),
+                        state: state(b.status),
+                        notes: b.notes.clone(),
+                    })
+                    .collect(),
+                candidates: p.candidates(&mods).into_iter().map(|m| m.id.clone()).collect(),
+            }),
+        })
+    }
+
+    /// Starts a deploy for a front end other than the window. An AI tool must
+    /// pass the user's request, and is refused while Settings' "Let AI tools
+    /// make changes" is off: a deploy rewrites the game's patch files.
+    pub fn start_deploy_as(&self, game: &GameInstall, caller: &Caller, request: Option<&str>) -> Result<(), VmmError> {
+        let request = request.map(str::trim).filter(|r| !r.is_empty());
+        if caller.is_ai() {
+            if !self.ai_changes_allowed() {
+                return Err(VmmError::new(
+                    ErrorCode::AiChangesOff,
+                    "Changes from AI tools are turned off in Vaexil Mod Manager's Settings. Nothing was deployed.",
+                ));
+            }
+            if request.is_none() {
+                return Err(VmmError::new(
+                    ErrorCode::Usage,
+                    "Pass the user's own request for this deploy as `request`. Nothing was deployed.",
+                ));
+            }
+        }
+        self.start_deploy(game, false)
+    }
+
+    /// Where a deploy started by [`Engine::start_deploy_as`] has got to. Once
+    /// it has finished, records it (as the window does) and includes its
+    /// report.
+    pub fn deploy_status(&self, game: Option<&GameInstall>) -> DeployStatus {
+        let (running, last_line) = self.deploy_progress();
+        let finished = !running && self.finish_deploy(game).is_some();
+        DeployStatus {
+            schema_version: SCHEMA_VERSION,
+            running,
+            last_line,
+            report: if finished || !running { self.deploy_report() } else { None },
+        }
+    }
+
+    /// Deploys and waits for the end, for `vmm deploy`. `on_line` gets the
+    /// deploy tool's latest line as it changes.
+    pub fn deploy_and_wait(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployStatus, VmmError> {
+        self.start_deploy_as(game, &Caller::Cli, None)?;
+        let mut last = String::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let (running, line) = self.deploy_progress();
+            if line != last {
+                on_line(&line);
+                last = line;
+            }
+            if !running {
+                if let Some(Some(problem)) = self.finish_deploy(Some(game)) {
+                    return Err(problem);
+                }
+                return Ok(DeployStatus {
+                    schema_version: SCHEMA_VERSION,
+                    running: false,
+                    last_line: last,
+                    report: self.deploy_report(),
+                });
+            }
+        }
     }
 }
 
@@ -1022,6 +1365,80 @@ mod tests {
         out
     }
 
+    /// Plans and applies one change from the CLI; returns the step.
+    fn run(engine: &Engine, game: &GameInstall, change: Change) -> PlanStep {
+        let plan = engine.plan(game, vec![change]).unwrap();
+        engine.apply_plan(game, &plan.plan_id, &Caller::Cli, None).unwrap();
+        plan.steps[0].clone()
+    }
+
+    #[test]
+    fn a_compatibility_pass_runs_through_plans() {
+        let (_tmp, game, engine) = setup();
+        let order = |e: &Engine| e.current_setup(&game).unwrap().order;
+        let step = run(&engine, &game, Change::StartPass { from_current: false });
+        assert!(step.description.contains("from every mod off (turns off: A)"), "{}", step.description);
+        assert!(order(&engine).is_empty());
+        // A second pass can't start while one is under way.
+        let err = engine.plan(&game, vec![Change::StartPass { from_current: true }]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::PassState);
+
+        let step = run(&engine, &game, Change::TryBatch { name: "First".into(), mods: vec!["A".into(), "B".into()] });
+        assert!(step.description.contains("\u{201c}First\u{201d}: A, B"), "{}", step.description);
+        assert_eq!(order(&engine), ["A", "B"]);
+        let step = run(&engine, &game, Change::MarkBatch { good: false, notes: "crashes".into() });
+        assert!(step.description.contains("bad: the game goes back to the baseline: none"), "{}", step.description);
+        assert!(order(&engine).is_empty());
+
+        run(&engine, &game, Change::TryBatch { name: String::new(), mods: vec!["C".into()] });
+        let step = run(&engine, &game, Change::MarkBatch { good: true, notes: String::new() });
+        assert!(step.description.ends_with("good: the baseline becomes: C"), "{}", step.description);
+        assert_eq!(order(&engine), ["C"]);
+        run(&engine, &game, Change::EndPass {});
+        assert!(Engine::with_data_dir(engine.data_dir().map(Path::to_path_buf)).setups().unwrap().pass.is_none());
+        assert_eq!(order(&engine), ["C"]);
+    }
+
+    #[test]
+    fn setups_are_saved_used_and_deleted_through_plans_one_step_at_a_time() {
+        let (_tmp, game, engine) = setup();
+        run(&engine, &game, Change::SaveSetup { name: "Just A".into() });
+        run(&engine, &game, Change::SetEnabled { mod_id: "B".into(), enabled: true });
+        // Setup steps stand alone.
+        let err = engine
+            .plan(
+                &game,
+                vec![
+                    Change::SetEnabled { mod_id: "C".into(), enabled: true },
+                    Change::UseSetup { name: "Just A".into() },
+                ],
+            )
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Usage);
+        let step = run(&engine, &game, Change::UseSetup { name: "just a".into() });
+        assert!(step.changes_something && step.description.ends_with("in this order: A"), "{}", step.description);
+        assert_eq!(engine.current_setup(&game).unwrap().order, ["A"]);
+        run(&engine, &game, Change::DeleteSetup { name: "Just A".into() });
+        let err = engine.plan(&game, vec![Change::UseSetup { name: "Just A".into() }]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OptionInvalid);
+    }
+
+    #[test]
+    fn auto_sort_keeps_the_rules() {
+        let (_tmp, game, engine) = setup();
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', loadAfter: ['B'] }",
+        )
+        .unwrap();
+        run(&engine, &game, Change::SetEnabled { mod_id: "B".into(), enabled: true });
+        // B went where A's rule wants it; put it last by hand, then sort.
+        run(&engine, &game, Change::Reorder { order: vec!["A".into(), "B".into()] });
+        let step = run(&engine, &game, Change::AutoSort {});
+        assert!(step.changes_something && step.description.ends_with(": B, A"), "{}", step.description);
+        assert_eq!(engine.current_setup(&game).unwrap().order, ["B", "A"]);
+    }
+
     #[test]
     fn the_journal_keeps_a_failure_beside_the_steps_applied() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1046,6 +1463,63 @@ mod tests {
             (entries[1]["steps"][0]["description"].as_str(), entries[1]["request"].as_str()),
             (Some("Turn B on"), Some("why"))
         );
+    }
+
+    #[test]
+    fn setup_steps_act_on_setups_saved_by_another_front_end() {
+        let (tmp, game, engine) = setup();
+        let data = tmp.path().join("data");
+        run(&engine, &game, Change::SaveSetup { name: "One".into() });
+        // Another front end replaces "One" with B alone and adds "Two".
+        let other = Engine::with_data_dir(Some(data.clone()));
+        other.set_enabled(&game, "A", false).unwrap();
+        other.set_enabled(&game, "B", true).unwrap();
+        other.save_setup(&game, "One").unwrap();
+        other.save_setup(&game, "Two").unwrap();
+        other.set_enabled(&game, "B", false).unwrap();
+        // This engine, made before, uses the new "One" and keeps "Two".
+        let step = run(&engine, &game, Change::UseSetup { name: "One".into() });
+        assert!(step.description.ends_with("in this order: B"), "{}", step.description);
+        assert_eq!(engine.current_setup(&game).unwrap().order, ["B"]);
+        run(&engine, &game, Change::SaveSetup { name: "Three".into() });
+        let names: Vec<String> = engine.setups().unwrap().saved.into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["One", "Two", "Three"]);
+    }
+
+    #[test]
+    fn switching_to_a_setup_that_fills_in_defaults_is_a_change() {
+        let (_tmp, game, engine) = setup();
+        // A is on with an option it has never had stored; the setup is A alone.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', options: [{ name: 'X', type: 'checkbox', enabledByDefault: true }] }",
+        )
+        .unwrap();
+        let mut saved = engine.setups().unwrap();
+        saved.put("Bare", vmm_core::backend::Setup { order: vec!["A".into()], options: Default::default() }).unwrap();
+        saved.save(engine.data_dir().unwrap()).unwrap();
+        let plan = engine.plan(&game, vec![Change::UseSetup { name: "Bare".into() }]).unwrap();
+        assert!(plan.steps[0].changes_something, "the defaults get stored");
+        let report = engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap();
+        assert!(report.steps[0].changes_something && report.needs_deploy);
+        // Now stored, switching again changes nothing.
+        let plan = engine.plan(&game, vec![Change::UseSetup { name: "Bare".into() }]).unwrap();
+        assert!(!plan.steps[0].changes_something);
+    }
+
+    #[test]
+    fn marking_a_batch_good_needs_no_deploy() {
+        let (_tmp, game, engine) = setup();
+        let apply = |c: Change| {
+            let plan = engine.plan(&game, vec![c]).unwrap();
+            engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap()
+        };
+        apply(Change::StartPass { from_current: false });
+        assert!(apply(Change::TryBatch { name: String::new(), mods: vec!["B".into()] }).needs_deploy);
+        let good = apply(Change::MarkBatch { good: true, notes: String::new() });
+        assert!(good.steps[0].changes_something, "the pass is saved");
+        assert!(!good.needs_deploy, "the game is as it was tried");
+        assert!(!apply(Change::SaveSetup { name: "S".into() }).needs_deploy);
     }
 
     #[test]

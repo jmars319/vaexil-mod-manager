@@ -277,6 +277,52 @@ pub enum Change {
     /// A new load order. It must hold exactly the mods that are on at that
     /// point of the plan.
     Reorder { order: Vec<String> },
+    /// The order that keeps every mod's load rules, moving as little as
+    /// possible (as the window's Auto-sort).
+    AutoSort {},
+    /// Make a saved setup the game's mods: exactly its mods on, in its order,
+    /// with its options. Planned on its own.
+    UseSetup { name: String },
+    /// Save the mods that are on, in their order with their options, as a
+    /// setup (replacing one of the same name). Planned on its own.
+    SaveSetup { name: String },
+    /// Delete a saved setup. Planned on its own.
+    DeleteSetup { name: String },
+    /// Start a compatibility pass: from every mod off, or from the mods on
+    /// now as the baseline. Planned on its own.
+    StartPass {
+        #[serde(default)]
+        from_current: bool,
+    },
+    /// Try a batch of mods on top of the pass's baseline. Planned on its own.
+    TryBatch {
+        #[serde(default)]
+        name: String,
+        mods: Vec<String>,
+    },
+    /// Mark the batch being tried: good joins the baseline, bad puts the game
+    /// back to the baseline. Planned on its own.
+    MarkBatch {
+        good: bool,
+        #[serde(default)]
+        notes: String,
+    },
+    /// End the pass, keeping the mods as they are. Planned on its own.
+    EndPass {},
+}
+
+impl Change {
+    /// Setup and pass steps are planned alone, one per plan.
+    pub fn stands_alone(&self) -> bool {
+        !matches!(
+            self,
+            Change::SetEnabled { .. }
+                | Change::SetOptions { .. }
+                | Change::SetKind { .. }
+                | Change::Reorder { .. }
+                | Change::AutoSort {}
+        )
+    }
 }
 
 /// A file a plan depends on, and its contents when it was made.
@@ -500,6 +546,69 @@ pub struct DeployReport {
     pub log_lines: usize,
 }
 
+/// A saved setup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupView {
+    pub name: String,
+    /// Mod ids, first to last.
+    pub order: Vec<String>,
+    /// Chosen options by mod id.
+    pub options: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether the mods on now are exactly this setup's, in its order.
+    pub in_use: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchState {
+    Testing,
+    Good,
+    Bad,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchView {
+    pub name: String,
+    pub mods: Vec<String>,
+    pub state: BatchState,
+    pub notes: String,
+}
+
+/// A compatibility pass: the known-good baseline and each batch tried.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PassView {
+    pub baseline: Vec<String>,
+    pub batches: Vec<BatchView>,
+    /// Mods that can go into the next batch: installed, readable, not in the
+    /// baseline.
+    pub candidates: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupList {
+    pub schema_version: u32,
+    pub setups: Vec<SetupView>,
+    /// The compatibility pass under way, if any.
+    pub pass: Option<PassView>,
+}
+
+/// A deploy started from the command line or an AI tool, while it runs and
+/// once it has finished.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeployStatus {
+    pub schema_version: u32,
+    pub running: bool,
+    /// The deploy tool's latest output line.
+    pub last_line: String,
+    /// Set once it has finished.
+    pub report: Option<DeployReport>,
+}
+
 /// `vmm deploy-report`: the last deploy, or none yet.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -556,6 +665,8 @@ pub fn all() -> Vec<(&'static str, schemars::Schema)> {
         ("error-code-list", schemars::schema_for!(ErrorCodeList)),
         ("log-list", schemars::schema_for!(LogList)),
         ("last-deploy", schemars::schema_for!(LastDeploy)),
+        ("setup-list", schemars::schema_for!(SetupList)),
+        ("deploy-status", schemars::schema_for!(DeployStatus)),
         ("diagnosis", schemars::schema_for!(Diagnosis)),
     ]
 }
@@ -590,7 +701,7 @@ mod tests {
         assert_eq!(list.codes.len(), ErrorCode::ALL.len());
         for c in &list.codes {
             assert!(!c.hint.is_empty() && !c.meaning.is_empty(), "{}", c.code);
-            assert!([2, 3, 4, 5, 10].contains(&c.exit_code), "{}", c.code);
+            assert!([2, 3, 4, 5, 6, 10].contains(&c.exit_code), "{}", c.code);
         }
         let mut codes: Vec<&str> = list.codes.iter().map(|c| c.code.as_str()).collect();
         codes.sort();
