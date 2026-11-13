@@ -83,6 +83,12 @@ impl Marker {
         Err(VmmError::new(ErrorCode::SmfUpdating, "SMF is already being updated. Nothing was changed."))
     }
 }
+impl Marker {
+    /// Restamps the marker, so a long update isn't taken for a crashed one.
+    fn refresh(&self) {
+        let _ = std::fs::write(&self.0, deploy::now_ms().to_string());
+    }
+}
 impl Drop for Marker {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
@@ -180,7 +186,7 @@ pub fn check(data: &Path, installed: &str) -> Result<(LastCheck, update::UpdateC
 /// people as it goes.
 pub fn run(job: &UpdateJob, progress: &mut dyn FnMut(String)) -> Result<String, VmmError> {
     check_processes()?;
-    let _marker = Marker::take(&job.data_dir)?;
+    let marker = Marker::take(&job.data_dir)?;
     let want = job.release.sha256.clone().ok_or_else(|| {
         VmmError::new(
             ErrorCode::DownloadMismatch,
@@ -201,6 +207,8 @@ pub fn run(job: &UpdateJob, progress: &mut dyn FnMut(String)) -> Result<String, 
             let pct = total.filter(|t| *t > 0).map_or(0, |t| done * 100 / t);
             if pct != last_pct {
                 last_pct = pct;
+                // A slow download keeps the marker fresh while it moves.
+                marker.refresh();
                 progress(format!("Downloading SMF {}: {pct}% of {} MB", job.release.tag, total.unwrap_or(0) >> 20));
             }
         })?;
@@ -213,6 +221,7 @@ pub fn run(job: &UpdateJob, progress: &mut dyn FnMut(String)) -> Result<String, 
             ));
         }
     }
+    marker.refresh();
     progress("Unpacking".into());
     let staging = dir.join("staging");
     update::extract(&zip, &staging)?;
