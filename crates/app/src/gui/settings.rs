@@ -295,7 +295,7 @@ fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
             if let Some(ui) = weak.upgrade() {
                 ui.global::<Ui>().set_sheet("settings".into());
                 let ss = ui.global::<SettingsState>();
-                ss.set_smf_note("SMF is being updated. The window closes once the update has finished.".into());
+                ss.set_smf_note("SMF is being updated. Close the window once the update has finished.".into());
                 ss.set_smf_note_error(true);
             }
             slint::CloseRequestResponse::KeepWindowShown
