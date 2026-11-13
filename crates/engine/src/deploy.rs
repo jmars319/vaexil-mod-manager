@@ -1,5 +1,5 @@
-//! Deploy and Play: SMF's `Deploy.exe` runs on a worker thread, its output
-//! goes to a log in the app's folder, and the window polls its progress.
+//! Deploy and Play: the framework's deploy runs on a worker thread, its
+//! output goes to a log in the app's folder, and front ends poll its progress.
 //! Neither runs while HITMAN, or another deploy, is running. Play deploys
 //! first when anything changed since the last deploy, then starts HITMAN
 //! through Steam.
@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
-use vmm_core::framework::{DeployOutcome, Framework};
+use vmm_backend_smf::Smf;
+use vmm_core::backend::{Backend, DeployOutcome};
+use vmm_core::error::{ErrorCode, VmmError};
 use vmm_core::game::{GameInstall, STEAM_APP_ID, Store};
-use vmm_core::smf::Smf;
 
 use crate::store;
 
@@ -45,7 +46,7 @@ impl Record {
         }
     }
 
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
+    pub fn save(&self, dir: &Path) -> Result<(), VmmError> {
         let mut m = Map::new();
         if let Some(f) = &self.fingerprint {
             m.insert("fingerprint".into(), Value::String(f.clone()));
@@ -78,7 +79,7 @@ pub struct Progress {
 
 #[derive(Debug, Clone)]
 pub struct Finished {
-    pub result: Result<DeployOutcome, String>,
+    pub result: Result<DeployOutcome, VmmError>,
     pub fingerprint: Option<String>,
     pub log: Option<PathBuf>,
     pub then_play: bool,
@@ -91,11 +92,11 @@ pub fn now_ms() -> u64 {
 }
 
 /// Why a deploy or Play can't start now, if it can't.
-pub fn blocked(running: &[String]) -> Option<String> {
+pub fn blocked(running: &[String]) -> Option<VmmError> {
     if running.iter().any(|r| r.eq_ignore_ascii_case("HITMAN3.exe")) {
-        Some("HITMAN is running. Close it to deploy.".into())
+        Some(VmmError::new(ErrorCode::GameRunning, "HITMAN is running. Close it to deploy."))
     } else if running.iter().any(|r| r.eq_ignore_ascii_case("Deploy.exe")) {
-        Some("SMF's Deploy.exe is already running. Wait for it to finish.".into())
+        Some(VmmError::new(ErrorCode::DeployRunning, "SMF's Deploy.exe is already running. Wait for it to finish."))
     } else {
         None
     }
@@ -159,12 +160,15 @@ fn new_log(dir: &Path) -> std::io::Result<PathBuf> {
 
 /// Starts HITMAN. Steam installs start through Steam, as its own Play
 /// button does; other stores are not supported yet.
-pub fn launch(game: &GameInstall) -> Result<(), String> {
+pub fn launch(game: &GameInstall) -> Result<(), VmmError> {
     match game.store {
-        Store::Steam => crate::platform::open(&format!("steam://rungameid/{STEAM_APP_ID}")),
-        other => Err(format!(
-            "Play starts HITMAN through Steam, and this copy is from {}. Start HITMAN from there; the deploy is done.",
-            other.label()
+        Store::Steam => crate::host::open(&format!("steam://rungameid/{STEAM_APP_ID}")),
+        other => Err(VmmError::new(
+            ErrorCode::LaunchUnsupported,
+            format!(
+                "Play starts HITMAN through Steam, and this copy is from {}. Start HITMAN from there; the deploy is done.",
+                other.label()
+            ),
         )),
     }
 }
@@ -227,9 +231,11 @@ mod tests {
         assert_eq!((busy.tone, busy.can_deploy), ("busy", false));
         assert!(busy.text.contains("Staging RPKG mod"));
         let b = blocked(&["hitman3.exe".into()]);
-        let s = status(false, "", &done, Some("f1"), b.as_deref());
+        assert_eq!(b.as_ref().map(|e| e.code), Some(ErrorCode::GameRunning));
+        let s = status(false, "", &done, Some("f1"), b.as_ref().map(|e| e.message.as_str()));
         assert!(!s.can_deploy && !s.can_play && s.text.contains("HITMAN is running"));
-        assert!(blocked(&["Deploy.exe".into()]).unwrap().contains("already running"));
+        let d = blocked(&["Deploy.exe".into()]).unwrap();
+        assert!(d.code == ErrorCode::DeployRunning && d.message.contains("already running"));
         assert!(blocked(&[]).is_none());
     }
 
@@ -258,6 +264,6 @@ mod tests {
     #[test]
     fn play_is_for_steam_copies() {
         let epic = GameInstall { store: Store::Epic, root: PathBuf::from("x") };
-        assert!(launch(&epic).unwrap_err().contains("Epic Games"));
+        assert!(launch(&epic).unwrap_err().message.contains("Epic Games"));
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "vmm-core"
-description = "Game discovery and framework inspection for Vaexil Mod Manager"
+description = "The shared contract for Vaexil Mod Manager: the backend trait, errors, game discovery and load-order logic"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,9 +11,6 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-json5.workspace = true
-semver.workspace = true
-sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

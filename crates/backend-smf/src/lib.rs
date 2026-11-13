@@ -1,7 +1,8 @@
-//! Simple Mod Framework, read through the files SMF documents for its users:
-//! `config.json`, the `Mods` folder and each mod's `manifest.json`. The only
-//! writes, to `config.json` (a mod on or off, a mod's options), live in
-//! [`write`](mod@write). Nothing here runs SMF.
+//! The Simple Mod Framework backend for HITMAN World of Assassination. It
+//! reads what SMF documents for its users: `config.json`, the `Mods` folder
+//! and each mod's `manifest.json`. Its only writes, to `config.json`, live in
+//! [`write`](mod@write); its only process is SMF's own `Deploy.exe`, run
+//! unchanged by [`deploy`].
 
 pub mod deploy;
 mod files;
@@ -19,10 +20,11 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::framework::{
-    DeployOutcome, Framework, Inspection, ModEntry, ModKind, OrderRule, Relation, Setup, Status, Version,
+use vmm_core::backend::{
+    Backend, DeployOutcome, Inspection, ModEntry, ModKind, OrderRule, Relation, Setup, Status, Version,
 };
-use crate::game::GameInstall;
+use vmm_core::error::{ErrorCode as C, VmmError};
+use vmm_core::game::GameInstall;
 
 /// A file SMF itself keeps in `Mods`; it is not a mod.
 const MANAGED_MARKER: &str = "Managed by SMF, do not touch";
@@ -61,7 +63,7 @@ impl Smf {
     }
 }
 
-impl Framework for Smf {
+impl Backend for Smf {
     fn name(&self) -> &'static str {
         "Simple Mod Framework"
     }
@@ -72,9 +74,9 @@ impl Framework for Smf {
         };
         let config = match read_config(&folder) {
             Ok(c) => c,
-            Err(reason) => {
+            Err(e) => {
                 return Inspection {
-                    status: Status::Unreadable { folder, reason },
+                    status: Status::Unreadable { folder, reason: e.message },
                     mods: Vec::new(),
                     notes: Vec::new(),
                 };
@@ -94,43 +96,43 @@ impl Framework for Smf {
         Inspection { status: Status::Installed { folder, version }, mods, notes }
     }
 
-    fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, VmmError> {
+        let folder = smf_folder(game)?;
         let mut options = None;
         let mut mods = Vec::new();
         if enabled {
             let m = self.find_mod(&folder, mod_id)?;
             if let Some(problem) = &m.problem {
-                return Err(format!("{} can't be turned on. {problem}", m.name));
+                return Err(VmmError::new(C::ModUnreadable, format!("{} can't be turned on. {problem}", m.name)));
             }
             let config = read_config(&folder)?;
             if m.badge.as_deref() != Some("RPKG") {
-                let manifest = read_manifest(&m.folder.join("manifest.json"))?;
+                let manifest = manifest_of(&m)?;
                 if !manifest.options.is_empty() {
                     options = Some(options::default_values(&manifest.options, &config.load_order));
                 }
             }
             mods = list_mods(&folder.join("Mods"), &config, &self.kinds).0;
         }
-        let place = |ids: &[String]| crate::order::insert_position(ids, mod_id, &mods);
+        let place = |ids: &[String]| vmm_core::order::insert_position(ids, mod_id, &mods);
         let place: write::Place = if enabled { Some(&place) } else { None };
         write::set_enabled(&folder, mod_id, enabled, options.as_deref(), place, self.backup_dir.as_deref())
     }
 
-    fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, VmmError> {
+        let folder = smf_folder(game)?;
         write::set_load_order(&folder, order, self.backup_dir.as_deref())
     }
 
-    fn current_setup(&self, game: &GameInstall) -> Result<Setup, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn current_setup(&self, game: &GameInstall) -> Result<Setup, VmmError> {
+        let folder = smf_folder(game)?;
         let config = read_config(&folder)?;
         let options = config.load_order.iter().filter_map(|id| Some((id.clone(), config.options_of(id)?))).collect();
         Ok(Setup { order: config.load_order, options })
     }
 
-    fn apply_setup(&self, game: &GameInstall, setup: &Setup) -> Result<Vec<String>, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn apply_setup(&self, game: &GameInstall, setup: &Setup) -> Result<Vec<String>, VmmError> {
+        let folder = smf_folder(game)?;
         let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
         let installed = |id: &String| mods.iter().any(|m| m.id == *id && m.problem.is_none());
         let (order, skipped): (Vec<String>, Vec<String>) = setup.order.iter().cloned().partition(|id| installed(id));
@@ -154,26 +156,26 @@ impl Framework for Smf {
         Ok(skipped)
     }
 
-    fn deploy_fingerprint(&self, game: &GameInstall) -> Result<String, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn deploy_fingerprint(&self, game: &GameInstall) -> Result<String, VmmError> {
+        let folder = smf_folder(game)?;
         deploy::fingerprint(&folder)
     }
 
-    fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, VmmError> {
+        let folder = smf_folder(game)?;
         deploy::deploy(&folder, on_line)
     }
 
-    fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String> {
-        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+    fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError> {
+        let folder = smf_folder(game)?;
         let m = self.find_mod(&folder, mod_id)?;
         if let Some(problem) = &m.problem {
-            return Err(format!("{}'s options can't be changed. {problem}", m.name));
+            return Err(VmmError::new(C::ModUnreadable, format!("{}'s options can't be changed. {problem}", m.name)));
         }
         if m.badge.as_deref() == Some("RPKG") {
-            return Err(format!("{} is an RPKG mod, which has no options.", m.name));
+            return Err(VmmError::new(C::OptionInvalid, format!("{} is an RPKG mod, which has no options.", m.name)));
         }
-        let manifest = read_manifest(&m.folder.join("manifest.json"))?;
+        let manifest = manifest_of(&m)?;
         let config = read_config(&folder)?;
         let values = options::validate(&manifest.options, chosen, &config.load_order)?;
         write::set_options(&folder, mod_id, &values, self.backup_dir.as_deref())
@@ -182,12 +184,23 @@ impl Framework for Smf {
 
 impl Smf {
     /// The mod in SMF's Mods folder with this id.
-    fn find_mod(&self, folder: &Path, mod_id: &str) -> Result<ModEntry, String> {
+    fn find_mod(&self, folder: &Path, mod_id: &str) -> Result<ModEntry, VmmError> {
         let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
         mods.into_iter()
             .find(|m| m.id == mod_id)
-            .ok_or_else(|| format!("\"{mod_id}\" is no longer in SMF's Mods folder."))
+            .ok_or_else(|| VmmError::new(C::ModNotFound, format!("\"{mod_id}\" is no longer in SMF's Mods folder.")))
     }
+}
+
+/// SMF's folder in this install, or the error that says it is gone.
+fn smf_folder(game: &GameInstall) -> Result<PathBuf, VmmError> {
+    find_folder(&game.root)
+        .ok_or_else(|| VmmError::new(C::FrameworkMissing, "Simple Mod Framework is no longer in the game folder."))
+}
+
+fn manifest_of(m: &ModEntry) -> Result<Manifest, VmmError> {
+    read_manifest(&m.folder.join("manifest.json"))
+        .map_err(|e| VmmError::new(C::ModUnreadable, format!("{}'s manifest.json could not be read: {e}", m.name)))
 }
 
 /// SMF lives in any folder directly inside the game root (its default
@@ -200,7 +213,7 @@ pub fn find_folder(game_root: &Path) -> Option<PathBuf> {
         .map(|e| e.path())
         .filter(|p| p.join("Deploy.exe").is_file() && p.join("config.json").is_file())
         .collect();
-    candidates.sort_by_key(|p| !crate::paths::file_name_eq(p, "Simple Mod Framework"));
+    candidates.sort_by_key(|p| !vmm_core::paths::file_name_eq(p, "Simple Mod Framework"));
     candidates.into_iter().next()
 }
 
@@ -222,11 +235,16 @@ impl Config {
     }
 }
 
-pub fn read_config(folder: &Path) -> Result<Config, String> {
+pub fn read_config(folder: &Path) -> Result<Config, VmmError> {
     let path = folder.join("config.json");
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
-    json5::from_str(text.trim_start_matches('\u{feff}'))
-        .map_err(|e| format!("SMF's config.json is not valid JSON ({e}). Fix or reset it in SMF before continuing."))
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| VmmError::new(C::Io, format!("Could not read {}: {e}", path.display())))?;
+    json5::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| {
+        VmmError::new(
+            C::ConfigUnreadable,
+            format!("SMF's config.json is not valid JSON ({e}). Fix or reset it in SMF before continuing."),
+        )
+    })
 }
 
 /// Identifies the installed release by `Deploy.exe`'s SHA-256. Releases do
@@ -560,7 +578,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::game::Store;
+    use vmm_core::game::Store;
 
     fn fake_install(root: &Path, deploy: &[u8]) -> PathBuf {
         let smf = root.join("Simple Mod Framework");
@@ -683,7 +701,7 @@ mod tests {
             smf.inspect(&game).mods.iter().filter(|m| m.name != "Broken").map(|m| m.load_position).collect();
         assert_eq!(order, [Some(1), Some(2), None]);
 
-        assert!(smf.set_enabled(&game, "Broken", true).unwrap_err().contains("can't be turned on"));
+        assert!(smf.set_enabled(&game, "Broken", true).unwrap_err().message.contains("can't be turned on"));
 
         // An enabled mod whose manifest breaks keeps a row under its old id,
         // so it can still be turned off.
@@ -693,7 +711,7 @@ mod tests {
         assert_eq!(orphan.load_position, Some(2));
         assert!(orphan.problem.as_deref().unwrap().contains("no mod in the Mods folder"));
         assert!(smf.set_enabled(&game, "Someone.Accents", false).unwrap());
-        assert!(smf.set_enabled(&game, "Nobody.Gone", true).unwrap_err().contains("no longer"));
+        assert!(smf.set_enabled(&game, "Nobody.Gone", true).unwrap_err().message.contains("no longer"));
         // A mod whose folder is gone can still be turned off.
         assert!(smf.set_enabled(&game, "Atampy26.RealisticAI", false).unwrap());
     }
@@ -725,12 +743,12 @@ mod tests {
         assert_eq!(chosen, ["Mood:Angry"]);
 
         let err = smf.set_options(&game, "Atampy26.RealisticAI", &["With accents".into()]).unwrap_err();
-        assert!(err.contains("needs Someone.Accents"), "{err}");
+        assert!(err.message.contains("needs Someone.Accents"), "{err}");
         assert!(smf.set_enabled(&game, "Someone.Accents", true).unwrap());
         assert!(smf.set_options(&game, "Atampy26.RealisticAI", &["With accents".into()]).unwrap());
 
-        assert!(smf.set_options(&game, "Winter Suit", &[]).unwrap_err().contains("RPKG"));
-        assert!(smf.set_options(&game, "Broken", &[]).unwrap_err().contains("can't be changed"));
+        assert!(smf.set_options(&game, "Winter Suit", &[]).unwrap_err().message.contains("RPKG"));
+        assert!(smf.set_options(&game, "Broken", &[]).unwrap_err().message.contains("can't be changed"));
     }
 
     #[test]
@@ -908,7 +926,7 @@ mod tests {
             std::fs::write(dir.join("Deploy.exe"), b"").unwrap();
             std::fs::write(dir.join("config.json"), b"{}").unwrap();
         }
-        assert!(crate::paths::file_name_eq(&find_folder(tmp.path()).unwrap(), "Simple Mod Framework"));
+        assert!(vmm_core::paths::file_name_eq(&find_folder(tmp.path()).unwrap(), "Simple Mod Framework"));
     }
 
     #[test]

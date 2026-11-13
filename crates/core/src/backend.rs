@@ -1,13 +1,14 @@
-//! What every mod framework module reports. The window only sees these types,
-//! so a second framework can be added without changing it. Version 1 has one
-//! module, [`crate::smf::Smf`].
+//! What every game backend reports and can do. Front ends see only these
+//! types (through the engine), so a second backend can be added without
+//! changing them. Version 1 has one backend, `vmm-backend-smf`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use crate::error::VmmError;
 use crate::game::GameInstall;
 
-pub trait Framework {
+pub trait Backend {
     /// The name shown in the window, such as "Simple Mod Framework".
     fn name(&self) -> &'static str;
 
@@ -16,30 +17,30 @@ pub trait Framework {
 
     /// Turns one mod on or off in the framework's own settings. Returns
     /// `false` when the mod was already in that state and nothing was written.
-    fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, String>;
+    fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, VmmError>;
 
     /// Saves which of a mod's options are chosen, given as their
     /// [`ModOption::value`]s. Returns `false` when nothing changed.
-    fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String>;
+    fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError>;
 
     /// Saves a new load order. It must hold exactly the mods that are on now,
     /// first to last; anything else is refused. Returns `false` when the order
     /// was already this.
-    fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, String>;
+    fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, VmmError>;
 
     /// The mods that are on, in order, with their chosen options.
-    fn current_setup(&self, game: &GameInstall) -> Result<Setup, String>;
+    fn current_setup(&self, game: &GameInstall) -> Result<Setup, VmmError>;
 
     /// Makes `setup` the framework's state: exactly its mods on, in its order,
     /// with its options. Mods it names that are no longer installed are left
     /// out and returned.
-    fn apply_setup(&self, game: &GameInstall, setup: &Setup) -> Result<Vec<String>, String>;
+    fn apply_setup(&self, game: &GameInstall, setup: &Setup) -> Result<Vec<String>, VmmError>;
 
     /// Changes whenever something a deploy reads has changed.
-    fn deploy_fingerprint(&self, game: &GameInstall) -> Result<String, String>;
+    fn deploy_fingerprint(&self, game: &GameInstall) -> Result<String, VmmError>;
 
     /// Runs the framework's own deploy, passing each output line to `on_line`.
-    fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, String>;
+    fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, VmmError>;
 }
 
 /// A saved state: which mods are on, in what order, with what options.

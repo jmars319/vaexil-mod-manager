@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::framework::ModKind;
+use vmm_core::backend::ModKind;
 
 /// Entity files patch almost anything (outfits, lighting, AI), so they count
 /// for less than files that say plainly what they are.

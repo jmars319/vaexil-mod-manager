@@ -1,14 +1,14 @@
-//! The window's Deploy and Play, setups, and compatibility-pass actions.
-//! Every change to SMF goes through the framework, with its usual backup.
+//! The window's Deploy and Play, setups, and compatibility-pass actions. Each
+//! one is a call to the engine; this module only turns results into words.
 
 use std::rc::Rc;
 use std::time::Duration;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
-use vmm_core::framework::{Framework, Setup};
+use vmm_engine::deploy as play;
+use vmm_engine::setups::BatchStatus;
 
-use super::{State, play, refresh};
-use crate::setups::{Pass, Setups};
+use super::{State, refresh};
 use crate::{AppWindow, PassBatch, PassCandidate, PassState, SetupsState, Ui};
 
 /// Deploy, Play and Open log, plus the timer that follows a running deploy.
@@ -17,9 +17,10 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
     {
         let (weak, state) = (ui.as_weak(), state.clone());
         g.on_deploy(move || {
-            if let Some(ui) = weak.upgrade() {
-                start_deploy(&ui, &state, false);
-            }
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(game) = state.game.borrow().clone() else { return };
+            note(&state, state.engine.start_deploy(&game, false).err().map(|e| e.message));
+            refresh(&ui, &state);
         });
     }
     {
@@ -27,24 +28,18 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
         g.on_play(move || {
             let Some(ui) = weak.upgrade() else { return };
             let Some(game) = state.game.borrow().clone() else { return };
-            let current = state.smf.deploy_fingerprint(&game).ok();
-            // The status line takes its own next time.
+            // The status line takes its own fingerprint next time.
             *state.fingerprint.borrow_mut() = None;
-            if current.is_some() && current == state.record.borrow().fingerprint {
-                note(&state, play::launch(&game).err());
-                refresh(&ui, &state);
-            } else {
-                start_deploy(&ui, &state, true);
-            }
+            note(&state, state.engine.play(&game).err().map(|e| e.message));
+            refresh(&ui, &state);
         });
     }
     {
         let (weak, state) = (ui.as_weak(), state.clone());
         g.on_open_log(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let log = state.record.borrow().log.clone();
-            if let Some(log) = log {
-                note(&state, crate::platform::open(&log).err());
+            if let Some(log) = state.engine.record().log {
+                note(&state, vmm_engine::host::open(&log).err().map(|e| e.message));
                 refresh(&ui, &state);
             }
         });
@@ -54,35 +49,16 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
     let (weak, state) = (ui.as_weak(), state.clone());
     timer.start(slint::TimerMode::Repeated, Duration::from_millis(300), move || {
         let Some(ui) = weak.upgrade() else { return };
-        let finished = {
-            let mut p = state.deploy.lock().expect("deploy progress lock");
-            if !p.running && p.finished.is_none() {
-                return;
+        let (running, _) = state.engine.deploy_progress();
+        let game = state.game.borrow().clone();
+        match state.engine.finish_deploy(game.as_ref()) {
+            Some(problem) => {
+                // Look again after a deploy, rather than trust a cached one.
+                *state.fingerprint.borrow_mut() = None;
+                note(&state, problem.map(|e| e.message));
             }
-            p.finished.take()
-        };
-        if let Some(f) = finished {
-            let success = matches!(f.result, Ok(ref o) if o.success);
-            let record = play::Record {
-                fingerprint: if success { f.fingerprint.clone() } else { None },
-                success: Some(success),
-                exit_code: f.result.as_ref().ok().and_then(|o| o.exit_code),
-                log: f.log.map(|p| p.display().to_string()),
-                at_ms: Some(play::now_ms()),
-            };
-            if let Some(dir) = &state.data_dir {
-                let _ = record.save(dir);
-            }
-            *state.record.borrow_mut() = record;
-            // Look again after a deploy, rather than trust a cached one.
-            *state.fingerprint.borrow_mut() = None;
-            let problem = match &f.result {
-                Err(e) => Some(format!("Couldn't run SMF's Deploy.exe. {e}")),
-                Ok(_) if !success => None,
-                Ok(_) if f.then_play => state.game.borrow().as_ref().and_then(|g| play::launch(g).err()),
-                Ok(_) => None,
-            };
-            note(&state, problem);
+            None if !running => return,
+            None => {}
         }
         refresh(&ui, &state);
     });
@@ -91,36 +67,6 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
 
 fn note(state: &State, problem: Option<String>) {
     *state.error.borrow_mut() = problem;
-}
-
-fn start_deploy(ui: &AppWindow, state: &Rc<State>, then_play: bool) {
-    let Some(game) = state.game.borrow().clone() else { return };
-    if let Some(why) = play::blocked(&crate::platform::running(&play::BLOCKERS)) {
-        note(state, Some(why));
-        refresh(ui, state);
-        return;
-    }
-    let logs = state.data_dir.as_ref().map(|d| d.join("logs"));
-    play::start(&state.deploy, game, logs, then_play);
-    refresh(ui, state);
-}
-
-/// Applies `order` as the mods that are on, keeping each mod's options.
-fn apply_order(state: &State, order: Vec<String>) -> Result<Vec<String>, String> {
-    if state.data_dir.is_none() {
-        return Err("Windows didn't say where your local app data folder is (%LOCALAPPDATA%), so there is nowhere \
-                    to keep a copy of SMF's config.json. Nothing was changed."
-            .into());
-    }
-    let game = state.game.borrow().clone().ok_or("HITMAN is no longer where it was. Nothing was changed.")?;
-    state.smf.apply_setup(&game, &Setup { order, options: Default::default() })
-}
-
-fn save_setups(state: &State, setups: &Setups) -> Result<(), String> {
-    let dir = state.data_dir.as_ref().ok_or("There is no folder to keep setups in.")?;
-    setups.save(dir)?;
-    *state.setups.borrow_mut() = Ok(setups.clone());
-    Ok(())
 }
 
 /// The Setups sheet: save the mods that are on as a setup, switch to one, or
@@ -151,12 +97,10 @@ pub fn wire_setups(ui: &AppWindow, state: &Rc<State>) {
         let (weak, state) = (ui.as_weak(), state.clone());
         ss.on_save_as(move |name| {
             let Some(ui) = weak.upgrade() else { return };
-            let result = (|| {
-                let game = state.game.borrow().clone().ok_or("HITMAN is no longer where it was.")?;
-                let mut setups = state.setups.borrow().clone()?;
-                setups.put(&name, state.smf.current_setup(&game)?)?;
-                save_setups(&state, &setups)
-            })();
+            let result = match state.game.borrow().clone() {
+                Some(game) => state.engine.save_setup(&game, &name).map_err(|e| e.message),
+                None => Err("HITMAN is no longer where it was.".to_string()),
+            };
             match result {
                 Ok(()) => ui.global::<SetupsState>().set_name("".into()),
                 Err(e) => ui.global::<SetupsState>().set_error(e.into()),
@@ -168,30 +112,18 @@ pub fn wire_setups(ui: &AppWindow, state: &Rc<State>) {
         let (weak, state) = (ui.as_weak(), state.clone());
         ss.on_use_setup(move |i| {
             let Some(ui) = weak.upgrade() else { return };
-            let result = (|| {
-                let setups = state.setups.borrow().clone()?;
-                let s = setups.saved.get(i as usize).ok_or("That setup is gone.")?;
-                let game =
-                    state.game.borrow().clone().ok_or("HITMAN is no longer where it was. Nothing was changed.")?;
-                if state.data_dir.is_none() {
-                    return Err(
-                        "There is nowhere to keep a copy of SMF's config.json. Nothing was changed.".to_string()
-                    );
-                }
-                let skipped = state.smf.apply_setup(&game, &s.setup)?;
-                Ok((s.name.clone(), skipped))
-            })();
-            match result {
+            let result = match state.game.borrow().clone() {
+                Some(game) => state.engine.use_setup(&game, i.max(0) as usize).map_err(|e| e.message),
+                None => Err("HITMAN is no longer where it was. Nothing was changed.".to_string()),
+            };
+            let msg = match result {
+                Ok((name, skipped)) if skipped.is_empty() => format!("Switched to {name}."),
                 Ok((name, skipped)) => {
-                    let msg = if skipped.is_empty() {
-                        format!("Switched to {name}.")
-                    } else {
-                        format!("Switched to {name}. Not installed now, so left out: {}.", skipped.join(", "))
-                    };
-                    ui.global::<SetupsState>().set_error(msg.into());
+                    format!("Switched to {name}. Not installed now, so left out: {}.", skipped.join(", "))
                 }
-                Err(e) => ui.global::<SetupsState>().set_error(format!("Couldn't switch. {e}").into()),
-            }
+                Err(e) => format!("Couldn't switch. {e}"),
+            };
+            ui.global::<SetupsState>().set_error(msg.into());
             refresh(&ui, &state);
         });
     }
@@ -199,15 +131,8 @@ pub fn wire_setups(ui: &AppWindow, state: &Rc<State>) {
         let (weak, state) = (ui.as_weak(), state.clone());
         ss.on_delete_setup(move |i| {
             let Some(ui) = weak.upgrade() else { return };
-            let result = (|| {
-                let mut setups = state.setups.borrow().clone()?;
-                if (i as usize) < setups.saved.len() {
-                    setups.saved.remove(i as usize);
-                }
-                save_setups(&state, &setups)
-            })();
-            if let Err(e) = result {
-                ui.global::<SetupsState>().set_error(e.into());
+            if let Err(e) = state.engine.delete_setup(i.max(0) as usize) {
+                ui.global::<SetupsState>().set_error(e.message.into());
             }
             refresh(&ui, &state);
         });
@@ -226,18 +151,16 @@ pub fn wire_pass(ui: &AppWindow, state: &Rc<State>) {
             refresh(&ui, &state);
         });
     }
-    // Runs `step` on the pass, saves it, and puts the game in the pass's
-    // target order. Errors show in the pass view.
-    fn act(ui: &AppWindow, state: &Rc<State>, step: impl FnOnce(&State, &mut Option<Pass>) -> Result<(), String>) {
-        let result = (|| {
-            let mut setups = state.setups.borrow().clone()?;
-            step(state, &mut setups.pass)?;
-            if let Some(pass) = &setups.pass {
-                let target = pass.target_order(&state.mods.borrow());
-                apply_order(state, target)?;
-            }
-            save_setups(state, &setups)
-        })();
+    // Runs a pass step through the engine. Errors show in the pass view.
+    fn act(
+        ui: &AppWindow,
+        state: &Rc<State>,
+        step: impl FnOnce(&vmm_engine::Engine, &vmm_core::game::GameInstall) -> vmm_core::error::Result<()>,
+    ) {
+        let result = match state.game.borrow().clone() {
+            Some(game) => step(&state.engine, &game).map_err(|e| e.message),
+            None => Err("HITMAN is no longer where it was. Nothing was changed.".to_string()),
+        };
         ui.global::<PassState>().set_error(result.err().unwrap_or_default().into());
         refresh(ui, state);
     }
@@ -245,12 +168,7 @@ pub fn wire_pass(ui: &AppWindow, state: &Rc<State>) {
         let (weak, state) = (ui.as_weak(), state.clone());
         ps.on_start(move |from_current| {
             let Some(ui) = weak.upgrade() else { return };
-            act(&ui, &state, |state, pass| {
-                let baseline =
-                    if from_current { super::order_view::current_order(&state.mods.borrow()) } else { vec![] };
-                *pass = Some(Pass { baseline, batches: vec![] });
-                Ok(())
-            });
+            act(&ui, &state, |engine, game| engine.start_pass(game, from_current));
         });
     }
     {
@@ -270,7 +188,7 @@ pub fn wire_pass(ui: &AppWindow, state: &Rc<State>) {
         ps.on_begin(move |name| {
             let Some(ui) = weak.upgrade() else { return };
             let picked = state.pass_picked.borrow().clone();
-            act(&ui, &state, |_, pass| pass.as_mut().ok_or("Start a pass first.")?.begin(&name, picked));
+            act(&ui, &state, |engine, game| engine.begin_batch(game, &name, picked));
             if ui.global::<PassState>().get_error().is_empty() {
                 state.pass_picked.borrow_mut().clear();
                 ui.global::<PassState>().set_batch_name("".into());
@@ -281,10 +199,7 @@ pub fn wire_pass(ui: &AppWindow, state: &Rc<State>) {
         let (weak, state) = (ui.as_weak(), state.clone());
         ps.on_mark(move |good, notes| {
             let Some(ui) = weak.upgrade() else { return };
-            act(&ui, &state, |state, pass| {
-                let order = super::order_view::current_order(&state.mods.borrow());
-                pass.as_mut().ok_or("There is no pass.")?.mark(good, &order, &notes)
-            });
+            act(&ui, &state, |engine, game| engine.mark_batch(game, good, &notes));
         });
     }
     {
@@ -292,11 +207,7 @@ pub fn wire_pass(ui: &AppWindow, state: &Rc<State>) {
         ps.on_end(move || {
             let Some(ui) = weak.upgrade() else { return };
             // Ending keeps the game as it is now; nothing in SMF changes.
-            let result = (|| {
-                let mut setups = state.setups.borrow().clone()?;
-                setups.pass = None;
-                save_setups(&state, &setups)
-            })();
+            let result = state.engine.end_pass().map_err(|e| e.message);
             ui.global::<PassState>().set_error(result.err().unwrap_or_default().into());
             refresh(&ui, &state);
         });
@@ -311,27 +222,26 @@ pub fn refresh_extras(ui: &AppWindow, state: &State) {
     // one while a cheap check (config.json and the top of Mods) is unchanged,
     // for up to 30 seconds. Play and Deploy always take a fresh one.
     let current = {
-        let quick = game
-            .as_ref()
-            .and_then(|g| vmm_core::smf::find_folder(&g.root))
-            .map(|f| vmm_core::smf::deploy::quick_key(&f))
-            .unwrap_or_default();
+        let quick = game.as_ref().map(|g| state.engine.quick_key(g)).unwrap_or_default();
         let mut cached = state.fingerprint.borrow_mut();
         let fresh = cached.as_ref().is_some_and(|(at, key, _)| *key == quick && at.elapsed() < Duration::from_secs(30));
         if !fresh {
             *cached = game
                 .as_ref()
-                .and_then(|g| state.smf.deploy_fingerprint(g).ok())
+                .and_then(|g| state.engine.fingerprint(g).ok())
                 .map(|f| (std::time::Instant::now(), quick.clone(), f));
         }
         cached.as_ref().map(|(_, _, f)| f.clone())
     };
-    let (running, last) = {
-        let p = state.deploy.lock().expect("deploy progress lock");
-        (p.running, p.last_line.clone())
-    };
-    let blocker = if running { None } else { play::blocked(&crate::platform::running(&play::BLOCKERS)) };
-    let s = play::status(running, &last, &state.record.borrow(), current.as_deref(), blocker.as_deref());
+    let (running, last) = state.engine.deploy_progress();
+    let blocker = if running { None } else { state.engine.blocker() };
+    let s = play::status(
+        running,
+        &last,
+        &state.engine.record(),
+        current.as_deref(),
+        blocker.as_ref().map(|e| e.message.as_str()),
+    );
     g.set_deploy_status(s.text.into());
     g.set_deploy_tone(s.tone.into());
     g.set_can_deploy(s.can_deploy && game.is_some());
@@ -340,8 +250,9 @@ pub fn refresh_extras(ui: &AppWindow, state: &State) {
 
     // Setups.
     let ss = ui.global::<SetupsState>();
-    let now = game.as_ref().and_then(|g| state.smf.current_setup(g).ok());
-    match &*state.setups.borrow() {
+    let now = game.as_ref().and_then(|g| state.engine.current_setup(g).ok());
+    let setups = state.engine.setups();
+    match &setups {
         Ok(setups) => {
             let names: Vec<SharedString> = setups
                 .saved
@@ -365,7 +276,7 @@ pub fn refresh_extras(ui: &AppWindow, state: &State) {
         }
         Err(e) => {
             ss.set_setups(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
-            ss.set_unreadable(e.clone().into());
+            ss.set_unreadable(e.message.clone().into());
             g.set_setup_label("Setups".into());
         }
     }
@@ -374,7 +285,7 @@ pub fn refresh_extras(ui: &AppWindow, state: &State) {
     let ps = ui.global::<PassState>();
     let mods = state.mods.borrow();
     let name_of = |id: &str| mods.iter().find(|m| m.id == id).map_or(id.to_string(), |m| m.name.clone());
-    let pass = state.setups.borrow().as_ref().ok().and_then(|s| s.pass.clone());
+    let pass = setups.as_ref().ok().and_then(|s| s.pass.clone());
     ps.set_active(pass.is_some());
     let Some(pass) = pass else {
         ps.set_batches(ModelRc::new(VecModel::from(Vec::<PassBatch>::new())));
@@ -429,7 +340,7 @@ pub fn refresh_extras(ui: &AppWindow, state: &State) {
                 let tried: Vec<&str> = pass
                     .batches
                     .iter()
-                    .filter(|b| b.status == crate::setups::BatchStatus::Bad && b.mods.contains(&m.id))
+                    .filter(|b| b.status == BatchStatus::Bad && b.mods.contains(&m.id))
                     .map(|b| b.name.as_str())
                     .collect();
                 if tried.is_empty() { String::new() } else { format!("Was in a bad batch: {}", tried.join(", ")) }

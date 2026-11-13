@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::{Map, Value};
-use vmm_core::framework::{ModEntry, Setup};
+use vmm_core::backend::{ModEntry, Setup};
+use vmm_core::error::{ErrorCode, VmmError};
 
 use crate::store;
 
@@ -81,15 +82,18 @@ impl Pass {
         out
     }
 
-    pub fn begin(&mut self, name: &str, mods: Vec<String>) -> Result<(), String> {
+    pub fn begin(&mut self, name: &str, mods: Vec<String>) -> Result<(), VmmError> {
         if self.active().is_some() {
-            return Err("A batch is already being tried. Mark it good or bad first.".into());
+            return Err(VmmError::new(
+                ErrorCode::PassState,
+                "A batch is already being tried. Mark it good or bad first.",
+            ));
         }
         if mods.is_empty() {
-            return Err("Pick at least one mod for the batch.".into());
+            return Err(VmmError::new(ErrorCode::PassState, "Pick at least one mod for the batch."));
         }
         if let Some(m) = mods.iter().find(|m| self.baseline.contains(m)) {
-            return Err(format!("{m} is already in the baseline."));
+            return Err(VmmError::new(ErrorCode::PassState, format!("{m} is already in the baseline.")));
         }
         let name =
             if name.trim().is_empty() { format!("Batch {}", self.batches.len() + 1) } else { name.trim().to_string() };
@@ -99,8 +103,8 @@ impl Pass {
 
     /// Marks the batch being tried. `order` is the order it was tried in:
     /// when good, that order (baseline plus batch) becomes the new baseline.
-    pub fn mark(&mut self, good: bool, order: &[String], notes: &str) -> Result<(), String> {
-        let i = self.active().ok_or("No batch is being tried.")?;
+    pub fn mark(&mut self, good: bool, order: &[String], notes: &str) -> Result<(), VmmError> {
+        let i = self.active().ok_or_else(|| VmmError::new(ErrorCode::PassState, "No batch is being tried."))?;
         let batch = &mut self.batches[i];
         batch.status = if good { BatchStatus::Good } else { BatchStatus::Bad };
         batch.notes = notes.trim().to_string();
@@ -136,7 +140,7 @@ pub struct Setups {
 }
 
 impl Setups {
-    pub fn load(dir: &Path) -> Result<Setups, String> {
+    pub fn load(dir: &Path) -> Result<Setups, VmmError> {
         let mut map = store::load(dir, FILE)?;
         let saved = match map.remove("setups") {
             Some(Value::Array(list)) => list.iter().filter_map(read_setup).collect(),
@@ -146,7 +150,7 @@ impl Setups {
         Ok(Setups { saved, pass, rest: map })
     }
 
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
+    pub fn save(&self, dir: &Path) -> Result<(), VmmError> {
         let mut map = self.rest.clone();
         map.insert("setups".into(), Value::Array(self.saved.iter().map(write_setup).collect()));
         match &self.pass {
@@ -157,10 +161,10 @@ impl Setups {
     }
 
     /// Saves `setup` under `name`, replacing a setup of the same name.
-    pub fn put(&mut self, name: &str, setup: Setup) -> Result<(), String> {
+    pub fn put(&mut self, name: &str, setup: Setup) -> Result<(), VmmError> {
         let name = name.trim();
         if name.is_empty() {
-            return Err("Give the setup a name.".into());
+            return Err(VmmError::new(ErrorCode::OptionInvalid, "Give the setup a name."));
         }
         match self.saved.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
             Some(s) => s.setup = setup,
@@ -238,7 +242,7 @@ fn write_pass(p: &Pass) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use vmm_core::framework::{OrderRule, Relation};
+    use vmm_core::backend::{OrderRule, Relation};
 
     use super::*;
 
@@ -263,7 +267,7 @@ mod tests {
 
         pass.begin("", ids(&["A", "B"])).unwrap();
         assert_eq!(pass.batches[0].name, "Batch 1");
-        assert!(pass.begin("Again", ids(&["C"])).unwrap_err().contains("already being tried"));
+        assert!(pass.begin("Again", ids(&["C"])).unwrap_err().message.contains("already being tried"));
         let tried = pass.target_order(&mods);
         assert_eq!(tried, ids(&["B", "Base", "A"]));
         pass.mark(true, &tried, "  stable for an hour ").unwrap();
@@ -279,7 +283,7 @@ mod tests {
         assert_eq!(pass.batches[1].status, BatchStatus::Bad);
 
         assert!(pass.begin("", vec![]).is_err());
-        assert!(pass.begin("", ids(&["A"])).unwrap_err().contains("baseline"));
+        assert!(pass.begin("", ids(&["A"])).unwrap_err().message.contains("baseline"));
         assert!(pass.mark(true, &[], "").is_err());
     }
 

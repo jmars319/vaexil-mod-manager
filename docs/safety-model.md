@@ -33,7 +33,7 @@ Enforcement:
 
 Enforcement:
 
-- All writing is in one module, `crates/core/src/smf/write.rs`, behind `Framework::set_enabled`. Tests cover key order, other keys, JSON5 input, defaults, the backup, a failed backup stopping the write, and a file it cannot read being left alone.
+- All writing to SMF's `config.json` is in one module, `crates/backend-smf/src/write.rs`, behind the `Backend` trait's change methods. The app's own files are written only by `crates/engine` (`settings.rs`, `setups.rs`, `store.rs`, `deploy.rs`). Tests cover key order, other keys, JSON5 input, defaults, the backup, a failed backup stopping the write, and a file it cannot read being left alone.
 - The mouse-click smoke test runs the real window against a throwaway game folder and checks that a click changes only the load order and leaves a backup, and that Save in the edit sheet stores the clicked option.
 - `VAEXIL_MOD_MANAGER_DATA` moves the app's folder for tests, so they never write to the user's profile.
 

@@ -15,7 +15,7 @@ The owner wants to stay current with HITMAN and with SMF as invisibly as possibl
 - It uses only what SMF documents for its users: `config.json`, the `Mods` folder, each mod's `manifest.json`, and `Deploy.exe` with the `--doNotPause --colors` flags SMF's own Mod Manager passes. No patches, no rebuilt `Deploy.exe`, no flags of its own.
 - Diagnostics are worked out from outside SMF: its log output, the processes it starts, and its staging folders.
 - A later stage applies new SMF releases automatically, the same way SMF's own updater does. A release is held only when upstream marks it "CANNOT AUTOMATICALLY UPDATE", never during a deploy, and never while HITMAN runs.
-- Each mod framework is a module behind one interface (`crates/core/src/framework.rs`). Version 1 has one, SMF. Only that module knows where SMF lives, so shipping a bundled copy of SMF later would change that module alone.
+- Each mod framework is a backend behind one interface (the `Backend` trait in `crates/core/src/backend.rs`; renamed from `Framework` by ADR 0003). Version 1 has one, SMF, in `crates/backend-smf`. Only that backend knows where SMF lives, so shipping a bundled copy of SMF later would change that backend alone.
 
 ## Consequences
 

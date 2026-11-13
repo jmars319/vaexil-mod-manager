@@ -11,7 +11,7 @@ Bug reports and pull requests are welcome. Vaexil Mod Manager drives the officia
   - make no network connections;
   - need no admin rights.
 - Design decisions are recorded in [docs/adr](docs/adr). The look comes from the Vaexil theme in `crates/app/ui/theme.slint`, which is copied unchanged from Modlist Launcher (ADR 0002). Use its components and `Theme` tokens rather than new colours, and do not edit that file here; change it in Modlist Launcher and copy it again.
-- Each mod framework is a module behind the `Framework` interface in `crates/core/src/framework.rs`. SMF is the only one so far, and the window must not depend on SMF specifics.
+- The workspace is split by job (ADR 0003): `crates/core` (`vmm-core`) is the shared contract (the `Backend` trait in `backend.rs`, `VmmError` and its stable codes in `error.rs`, game discovery, load-order logic); `crates/backend-smf` (`vmm-backend-smf`) is the SMF backend; `crates/engine` (`vmm-engine`) is every operation front ends share; `crates/app` is the window. The window calls the engine, never a backend's own functions for its behaviour.
 
 ## Working on it
 
@@ -29,7 +29,7 @@ cargo build --release -p vaexil-mod-manager
 CI runs all of these on every pull request, plus `cargo deny check`. Test clicks with the mouse, not only with UI Automation's Invoke, which skips the mouse path. `cargo deny` bans HTTP and TLS crates and rejects yanked or vulnerable ones. Both CI checks must pass before a pull request can merge.
 
 - Keep each pull request to one change.
-- Add tests for behaviour that can be tested. Platform-neutral logic belongs in `crates/core`, where it is unit tested.
+- Add tests for behaviour that can be tested. Logic belongs in the crate that owns it (core, a backend, or the engine), where it is unit tested; the window only turns the engine's answers into what it shows.
 - For UI changes:
   - check light and dark mode;
   - check keyboard use: Tab, Space/Enter;

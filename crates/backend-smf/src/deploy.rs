@@ -8,11 +8,12 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
 use sha2::{Digest, Sha256};
+use vmm_core::error::{ErrorCode as C, VmmError};
 
 /// The flags SMF's own Mod Manager passes.
 pub const ARGS: [&str; 2] = ["--doNotPause", "--colors"];
 
-pub use crate::framework::DeployOutcome;
+pub use vmm_core::backend::DeployOutcome;
 
 /// Runs `program` with `args` in `cwd`, passing each line of its output
 /// (stdout and stderr, colour codes removed) to `on_line` as it arrives.
@@ -21,7 +22,7 @@ pub fn run_tool(
     args: &[&str],
     cwd: &Path,
     on_line: &mut dyn FnMut(&str),
-) -> Result<DeployOutcome, String> {
+) -> Result<DeployOutcome, VmmError> {
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
@@ -30,7 +31,9 @@ pub fn run_tool(
         // CREATE_NO_WINDOW: no console window flashes up.
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("Could not start {}: {e}", program.display()))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| VmmError::new(C::DeployStartFailed, format!("Could not start {}: {e}", program.display())))?;
     let (tx, rx) = mpsc::channel::<String>();
     let mut readers = Vec::new();
     for stream in [
@@ -55,12 +58,13 @@ pub fn run_tool(
     for r in readers {
         let _ = r.join();
     }
-    let status = child.wait().map_err(|e| format!("Could not wait for {}: {e}", program.display()))?;
+    let status =
+        child.wait().map_err(|e| VmmError::new(C::Io, format!("Could not wait for {}: {e}", program.display())))?;
     Ok(DeployOutcome { success: status.success(), exit_code: status.code() })
 }
 
 /// Runs SMF's `Deploy.exe` in `smf_folder`.
-pub fn deploy(smf_folder: &Path, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, String> {
+pub fn deploy(smf_folder: &Path, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, VmmError> {
     run_tool(&smf_folder.join("Deploy.exe"), &ARGS, smf_folder, on_line)
 }
 
@@ -117,18 +121,22 @@ pub fn quick_key(smf_folder: &Path) -> String {
 /// file under `Mods` by path, size and modified time, so a file changed or
 /// replaced deep inside a mod counts. Equal fingerprints mean nothing changed
 /// since. Walking every mod takes about a tenth of a second on JASON-PC.
-pub fn fingerprint(smf_folder: &Path) -> Result<String, String> {
+pub fn fingerprint(smf_folder: &Path) -> Result<String, VmmError> {
     let mut h = Sha256::new();
     let config = smf_folder.join("config.json");
-    h.update(std::fs::read(&config).map_err(|e| format!("Could not read {}: {e}", config.display()))?);
+    h.update(
+        std::fs::read(&config)
+            .map_err(|e| VmmError::new(C::Io, format!("Could not read {}: {e}", config.display())))?,
+    );
     let mods = smf_folder.join("Mods");
     if !mods.is_dir() {
-        return Err(format!("Could not read {}: it is not a folder", mods.display()));
+        return Err(VmmError::new(C::Io, format!("Could not read {}: it is not a folder", mods.display())));
     }
     let mut entries: Vec<String> = Vec::new();
     let mut stack = vec![mods.clone()];
     while let Some(dir) = stack.pop() {
-        let list = std::fs::read_dir(&dir).map_err(|e| format!("Could not read {}: {e}", dir.display()))?;
+        let list = std::fs::read_dir(&dir)
+            .map_err(|e| VmmError::new(C::Io, format!("Could not read {}: {e}", dir.display())))?;
         for e in list.flatten() {
             let path = e.path();
             let rel = path.strip_prefix(&mods).unwrap_or(&path).to_string_lossy().into_owned();

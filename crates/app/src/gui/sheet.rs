@@ -1,14 +1,14 @@
 //! The edit sheet for one mod: its type and its options. Plain Rust, so it is
 //! tested without a window. Nothing is saved until Save.
 
-use vmm_core::framework::{ModEntry, ModKind};
+use vmm_core::backend::{ModEntry, ModKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditSheet {
     pub mod_id: String,
     pub title: String,
     pub subtitle: String,
-    /// "Automatic: <kind>" first, then every kind.
+    /// `Automatic: <kind>` first, then every kind.
     pub kind_labels: Vec<String>,
     /// 0 is automatic.
     pub kind_index: usize,
@@ -160,7 +160,7 @@ impl EditSheet {
 mod tests {
     use std::path::PathBuf;
 
-    use vmm_core::framework::ModOption;
+    use vmm_core::backend::ModOption;
 
     use super::*;
 
