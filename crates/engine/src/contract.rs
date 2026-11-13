@@ -278,7 +278,19 @@ impl Engine {
                 .iter()
                 .map(|m| (m.id.clone(), m.options.iter().filter(|o| o.chosen).map(|o| o.value.clone()).collect()))
                 .collect(),
-            kinds: self.kind_overrides(),
+            // A type change needs readable settings: refuse it now rather
+            // than after earlier steps have been applied.
+            kinds: if changes.iter().any(|c| matches!(c, Change::SetKind { .. })) {
+                let dir = self.data_dir().ok_or_else(|| {
+                    VmmError::new(
+                        ErrorCode::BackupUnavailable,
+                        "There is no folder to keep types in. Nothing was changed.",
+                    )
+                })?;
+                settings::Settings::load(dir)?.kind_overrides
+            } else {
+                self.kind_overrides()
+            },
         };
         let mut steps = Vec::new();
         for change in changes {
@@ -363,7 +375,19 @@ impl Engine {
 
     /// The files these changes depend on.
     fn preconditions(&self, game: &GameInstall, changes: &[Change]) -> Result<Vec<Precondition>, VmmError> {
-        let mut files = self.backend().state_files(game);
+        // The mods whose options or defaults the plan resolves.
+        let mut mods: Vec<String> = changes
+            .iter()
+            .filter_map(|c| match c {
+                Change::SetEnabled { mod_id, enabled: true } | Change::SetOptions { mod_id, .. } => {
+                    Some(mod_id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        mods.sort();
+        mods.dedup();
+        let mut files = self.backend().state_files(game, &mods);
         if changes.iter().any(|c| matches!(c, Change::SetKind { .. }))
             && let Some(dir) = self.data_dir()
         {
@@ -456,8 +480,14 @@ impl Engine {
             }
         }
         // The files are as planned; check the changes once more against the
-        // mods as they are now (a mod folder can go without touching them).
-        self.check(game, &plan.changes)?;
+        // mods as they are now (a mod folder can go without touching them),
+        // and refuse if they would now do anything other than the plan said.
+        if self.check(game, &plan.changes)? != plan.steps {
+            return Err(VmmError::new(
+                ErrorCode::ConfigChangedMeanwhile,
+                "What this plan would do has changed since it was made. Nothing was changed.",
+            ));
+        }
         std::fs::remove_file(&path).map_err(|e| {
             VmmError::new(ErrorCode::SaveFailed, format!("Couldn't mark the plan as used ({e}). Nothing was changed."))
         })?;
@@ -564,7 +594,7 @@ mod tests {
             )
             .unwrap();
         assert!(plan.steps.iter().all(|s| s.changes_something), "{:?}", plan.steps);
-        assert_eq!(plan.preconditions.len(), 2);
+        assert_eq!(plan.preconditions.len(), 3, "config.json, C's manifest and settings.json");
         let report = engine.apply_plan(&game, &plan.plan_id).unwrap();
         assert!(report.needs_deploy);
         assert_eq!(engine.current_setup(&game).unwrap().order, ["C", "A"]);
@@ -636,6 +666,39 @@ mod tests {
         // writes: the group's default.
         let plan = engine.plan(&game, vec![Change::SetOptions { mod_id: "E".into(), chosen: vec![] }]).unwrap();
         assert!(plan.steps[0].description.ends_with(": G:Q"), "{}", plan.steps[0].description);
+    }
+
+    #[test]
+    fn a_changed_manifest_or_unreadable_settings_stop_a_plan_before_any_write() {
+        let (tmp, game, engine) = setup();
+        with_option_mods(&game);
+        // E's default is Q. A plan for no explicit choice resolves to G:Q...
+        let plan = engine.plan(&game, vec![Change::SetOptions { mod_id: "E".into(), chosen: vec![] }]).unwrap();
+        assert_eq!(plan.preconditions.len(), 2, "config.json and E's manifest");
+        // ...and if the author makes P the default meanwhile, it isn't applied.
+        let manifest = game.root.join("Simple Mod Framework/Mods/E/manifest.json");
+        std::fs::write(
+            &manifest,
+            "{ id: 'E', name: 'E', options: [{ name: 'P', type: 'select', group: 'G', enabledByDefault: true }, \
+             { name: 'Q', type: 'select', group: 'G' }] }",
+        )
+        .unwrap();
+        let err = engine.apply_plan(&game, &plan.plan_id).unwrap_err();
+        assert_eq!(err.code, ErrorCode::ConfigChangedMeanwhile);
+
+        // A type change with unreadable settings is refused when planning.
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        std::fs::write(tmp.path().join("data/settings.json"), "{ not json").unwrap();
+        let err = engine
+            .plan(
+                &game,
+                vec![
+                    Change::SetEnabled { mod_id: "B".into(), enabled: true },
+                    Change::SetKind { mod_id: "A".into(), kind: Some(ModKind::Sound) },
+                ],
+            )
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::SettingsUnreadable);
     }
 
     #[test]

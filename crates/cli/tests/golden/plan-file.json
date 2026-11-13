@@ -30,6 +30,10 @@
       "sha256": "<sha256>"
     },
     {
+      "path": "<tmp>/game/Simple Mod Framework/Mods/B/manifest.json",
+      "sha256": "<sha256>"
+    },
+    {
       "path": "<tmp>/data/settings.json",
       "sha256": null
     }

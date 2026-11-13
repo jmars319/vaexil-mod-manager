@@ -91,8 +91,17 @@ impl Backend for Smf {
         }
     }
 
-    fn state_files(&self, game: &GameInstall) -> Vec<PathBuf> {
-        find_folder(&game.root).map(|f| vec![f.join("config.json")]).unwrap_or_default()
+    fn state_files(&self, game: &GameInstall, mods: &[String]) -> Vec<PathBuf> {
+        let Some(folder) = find_folder(&game.root) else { return vec![] };
+        let mut files = vec![folder.join("config.json")];
+        for id in mods {
+            if let Ok(m) = self.find_mod(&folder, id)
+                && m.badge.as_deref() != Some("RPKG")
+            {
+                files.push(m.folder.join("manifest.json"));
+            }
+        }
+        files
     }
 
     fn inspect(&self, game: &GameInstall) -> Inspection {

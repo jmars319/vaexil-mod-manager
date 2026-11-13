@@ -22,9 +22,11 @@ pub trait Backend {
     /// How the backend lives alongside the game's own mod system.
     fn native_mods(&self) -> NativeMods;
 
-    /// The files the backend's settings live in for this install. A plan
-    /// records their hashes and applying it refuses if any has changed.
-    fn state_files(&self, game: &GameInstall) -> Vec<PathBuf>;
+    /// The files the backend's settings live in for this install, and the
+    /// description files of `mods` (whose options and defaults a plan
+    /// depends on). A plan records their hashes and applying it refuses if
+    /// any has changed.
+    fn state_files(&self, game: &GameInstall, mods: &[String]) -> Vec<PathBuf>;
 
     /// Reads the framework's state for one game install. Never writes.
     fn inspect(&self, game: &GameInstall) -> Inspection;

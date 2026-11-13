@@ -211,7 +211,7 @@ mod tests {
         fn native_mods(&self) -> vmm_core::schema::NativeMods {
             unreachable!("the view doesn't show native mods")
         }
-        fn state_files(&self, _: &GameInstall) -> Vec<PathBuf> {
+        fn state_files(&self, _: &GameInstall, _: &[String]) -> Vec<PathBuf> {
             unreachable!("the view never plans")
         }
         fn inspect(&self, _: &GameInstall) -> Inspection {

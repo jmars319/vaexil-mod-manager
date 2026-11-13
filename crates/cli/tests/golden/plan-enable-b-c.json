@@ -28,6 +28,14 @@
     {
       "path": "<tmp>/game/Simple Mod Framework/config.json",
       "sha256": "<sha256>"
+    },
+    {
+      "path": "<tmp>/game/Simple Mod Framework/Mods/B/manifest.json",
+      "sha256": "<sha256>"
+    },
+    {
+      "path": "<tmp>/game/Simple Mod Framework/Mods/C/manifest.json",
+      "sha256": "<sha256>"
     }
   ],
   "createdAtMs": "<createdAtMs>",
