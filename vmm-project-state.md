@@ -18,19 +18,20 @@ The working state around the plan page and the docs. The plan page holds the roa
 - Stage 00 (direction, ADR-0034) and stage 01 (repo, read-only first window, #1) are done.
 - Stage 02, in progress since 2026-11-13, in four PRs:
   1. Mods view grouped by type, with on/off switches. #12, merged 2026-11-13 as 118506b. The app's first write.
-  2. Edit sheet per mod: options (`modOptions`) and a type override kept in the app's own `settings.json`. #14, in review.
+  2. Edit sheet per mod: options (`modOptions`) and a type override kept in the app's own `settings.json`. #14, merged 2026-11-13 as d43e161, after two Codex findings were fixed.
   3. Load order view: drag, Auto-sort by `loadBefore`/`loadAfter`, broken-rule warnings, "overridden by" markers in the Mods view.
-  4. Setups, Play (deploy if changed, then start HITMAN) and Deploy, both blocked while HITMAN runs.
-- Then stage 03 (deploy view and diagnostics), 04 (keep SMF current), 05 (Steam's Play button), 06 (first release and update notice). The old repo `JAMARQ-Digital-LLC/vaexil-simple-mod-framework` is archived, and its Dependabot #24 closed, after the app's first deploy on this PC.
+  4. Setups as profiles with compatibility passes (ADR 0003 section 7): a known-good baseline, small themed batches, each tested (deploy, log, play) and marked good, which joins the baseline, or bad, which is turned off in one step. Then Play (deploy if changed, then start HITMAN) and Deploy, both blocked while HITMAN runs.
+- Scope widened 2026-11-13: a multi-game mod manager that any LLM can operate (Claude, Gemini, GPT, local models). ADR 0003 (`docs/adr/0003-headless-engine-and-llm-interfaces.md`, accepted 2026-11-13 with the owner's decisions) adds a `vmm-engine` crate that every front end calls, backends as their own crates (SMF now, Cyberpunk 2077 later), one versioned JSON schema, a `vmm` CLI with `--json`, a stdio MCP server (`vmm mcp`), plan-then-apply for every change, and JSON logs and diagnosis. The owner's order (2026-11-13): finish stage 02 (PR 3 and PR 4) first. Then the ADR sequence: engine, CLI, MCP, then logs and diagnosis with old stage 03 folded in; SMF features onto the engine; Steam Play via `vmm play` (old 05); SMF updates as an engine job (old 04); first release (old 06); then the deploy engine, the `mo2` backend and Cyberpunk. No intended users for now: builds stay unsigned until the owner decides, and the owner wants automatic updates on JASON-PC from the jamarq-releases feed. AI tools stay read-only until the user asks for a specific change. Setup outside VMM (PATH, AI app registration) happens from the window's Settings. Deploys for other games use hard links with a ledger, plus an `mo2` backend for existing MO2 setups, so Modlist Launcher can later be absorbed. Each backend states its `nativeMods` status explicitly.
+- Old stages 03 to 06 now sit inside the ADR 0003 sequence (see above). The old repo `JAMARQ-Digital-LLC/vaexil-simple-mod-framework` is archived, and its Dependabot #24 closed, after the app's first deploy on this PC.
 
 ## Active Task State & Known Regressions
 
-- `main` is at #12 (118506b): grouped Mods view and switches. Before merging, its three Codex review findings were fixed, answered and resolved: no backup without an app data folder, concurrent writers, and a broken enabled mod that couldn't be turned off. Stage 02's PR 2, the edit sheet, is open as #14 (CI and the Codex review pending).
+- `main` is at #14 (d43e161), the edit sheet. Next: stage 02 PR 3, the load order view.
 - Merging needs every review thread resolved (branch protection: conversation resolution and linear history). GitHub auto-merge is off for this repo. Codex reviews each push.
-- Installed on JASON-PC: built from 118506b with `scripts/package.ps1` and installed per-user with the Inno installer (`/VERYSILENT`) on 2026-11-13. The installed exe's SHA-256 matches the build. Still versioned 0.1.0, because nothing is released. Checked against the real install without clicking: SMF 2.33.45, 15 mods, 10 on, no orphaned load-order ids.
+- Installed on JASON-PC: built from d43e161 with `scripts/package.ps1` and installed per-user with the Inno installer (`/VERYSILENT`) on 2026-11-13. The installed exe's SHA-256 matches the build. Still versioned 0.1.0, because nothing is released. Checked against the real install without clicking: SMF 2.33.45, 15 mods, 10 on, no orphaned load-order ids.
 - HITMAN folder (2026-11-12): official SMF 2.33.45 applied the way SMF's updater does, Vortex leftovers removed, the owner's 10-mod `config.json` restored. Test deploy took 30m32s with 0 errors. The pre-reinstall backup is in `Downloads\hitman-smf-backup-2026-11-12` until the owner has checked the game.
 - Known gaps:
-  - Type guesses put Lighting Ultimate and the glasses fix in Gameplay. #14's type override fixes that by hand, once it merges.
+  - Type guesses put Lighting Ultimate and the glasses fix in Gameplay. Fix them by hand with Edit, then Type.
   - SMF 2.33.43 and 2.33.44 are missing from the release table, so either would show as unknown until stage 04 replaces the table.
 - No GitHub release exists yet.
 
