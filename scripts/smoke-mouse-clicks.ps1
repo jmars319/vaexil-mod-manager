@@ -347,6 +347,17 @@ try {
     # "Copy diagnostics" replaces the clipboard, so only on CI, never on a
     # developer's machine.
     if ($env:CI) {
+        # The button is below the fold at this window size, and UI
+        # Automation lists only what is in view: Tab to it, which scrolls it
+        # into view.
+        for ($k = 0; $k -lt 30; $k++) {
+            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+            if ($focused -and $focused.Current.Name -eq 'Copy diagnostics') { break }
+            [SmokeClicks]::PostMessage($h, 0x0100, [IntPtr]0x09, [IntPtr]0x000F0001) | Out-Null   # WM_KEYDOWN Tab
+            [SmokeClicks]::PostMessage($h, 0x0101, [IntPtr]0x09, [IntPtr]0xC00F0001) | Out-Null   # WM_KEYUP Tab
+            Start-Sleep -Milliseconds 150
+        }
+        Start-Sleep -Milliseconds 400
         Click $window (Find-Control $window 'Copy diagnostics')
         Start-Sleep -Milliseconds 800
         $copied = try { Get-Clipboard -Raw | ConvertFrom-Json } catch { $null }

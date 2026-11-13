@@ -20,12 +20,20 @@ pub fn tilde(text: &str, profile: &str) -> String {
     if p.len() < 4 {
         return text.to_string();
     }
-    // Windows paths are case-insensitive; ASCII case is ignored, byte by
-    // byte, so positions in `text` stay exact.
+    // Windows paths are case-insensitive and take either separator; ASCII
+    // case is ignored and `/` matches `\`, byte by byte, so positions in
+    // `text` stay exact.
+    let same = |a: u8, b: u8| {
+        let sep = |c: u8| c == b'/' || c == b'\\';
+        a.eq_ignore_ascii_case(&b) || (sep(a) && sep(b))
+    };
     let mut out = String::with_capacity(text.len());
     let (mut i, mut start) = (0, 0);
     while i + p.len() <= t.len() {
-        if t[i..i + p.len()].eq_ignore_ascii_case(p) && text.is_char_boundary(i) && text.is_char_boundary(i + p.len()) {
+        if t[i..i + p.len()].iter().zip(p).all(|(&a, &b)| same(a, b))
+            && text.is_char_boundary(i)
+            && text.is_char_boundary(i + p.len())
+        {
             out.push_str(&text[start..i]);
             out.push('~');
             i += p.len();
@@ -199,6 +207,9 @@ mod tests {
         assert_eq!(tilde(r"C:\users\jason\AppData\x.log", p), r"~\AppData\x.log");
         assert_eq!(tilde(r"a C:\Users\Jason b C:\Users\Jason", p), "a ~ b ~");
         assert_eq!(tilde(r"D:\Games\HITMAN 3", p), r"D:\Games\HITMAN 3");
+        // Either separator, as a path set by hand may use.
+        assert_eq!(tilde("C:/Users/Jason/vmm-data", p), "~/vmm-data");
+        assert_eq!(tilde(r"c:\users/jason\x", p), r"~\x");
     }
 
     #[test]
