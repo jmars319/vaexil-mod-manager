@@ -298,13 +298,15 @@ impl Engine {
                 Change::SetEnabled { mod_id, enabled } => {
                     let m = find(mod_id)?;
                     let on = sim.order.contains(mod_id);
+                    // The backend checks a mod it is asked to turn on even when
+                    // it is on already, so a plan does too.
+                    if *enabled && let Some(problem) = &m.problem {
+                        return Err(VmmError::new(
+                            ErrorCode::ModUnreadable,
+                            format!("{} can't be turned on. {problem}", mod_label(m)),
+                        ));
+                    }
                     if *enabled && !on {
-                        if let Some(problem) = &m.problem {
-                            return Err(VmmError::new(
-                                ErrorCode::ModUnreadable,
-                                format!("{} can't be turned on. {problem}", mod_label(m)),
-                            ));
-                        }
                         sim.order.push(mod_id.clone());
                         // Turning a mod on gives it its default options.
                         let defaults = m.options.iter().filter(|o| o.chosen).map(|o| o.value.clone()).collect();
@@ -699,6 +701,25 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code, ErrorCode::SettingsUnreadable);
+    }
+
+    #[test]
+    fn turning_on_a_mod_that_is_on_but_unreadable_is_refused_when_planning() {
+        let (_tmp, game, engine) = setup();
+        // A is on; its manifest becomes unreadable.
+        std::fs::write(game.root.join("Simple Mod Framework/Mods/A/manifest.json"), "{ not json").unwrap();
+        let err = engine
+            .plan(
+                &game,
+                vec![
+                    Change::SetEnabled { mod_id: "B".into(), enabled: true },
+                    Change::SetEnabled { mod_id: "A".into(), enabled: true },
+                ],
+            )
+            .unwrap_err();
+        assert_eq!(err.code, ErrorCode::ModUnreadable);
+        // Turning it off is still allowed.
+        engine.plan(&game, vec![Change::SetEnabled { mod_id: "A".into(), enabled: false }]).unwrap();
     }
 
     #[test]
