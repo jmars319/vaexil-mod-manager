@@ -172,7 +172,7 @@ The engine keeps each pass as a profile history: the baseline, each batch, its n
 
 ## Sequence
 
-The owner chose (2026-11-13) to finish the SMF part of the app first, as it is built today. That is the rest of stage 02: the load order view, then setups with compatibility passes (section 7), Play and Deploy. Then come the steps below, in this order.
+The owner chose (2026-11-13) to finish the SMF part of the app first, as it is built today. That is the rest of stage 02: the load order view, then setups with compatibility passes (section 7), Play and Deploy. Then come the steps below, in this order. The older stages 03 to 06 are folded into them where the engine makes them smaller, so nothing is built twice.
 
 1. **Engine extraction.**
    - Create `vmm-engine` and move `smf` into `vmm-backend-smf`.
@@ -187,9 +187,12 @@ The owner chose (2026-11-13) to finish the SMF part of the app first, as it is b
    - `vmm mcp` with the read tools and `plan_change`/`apply_plan`.
    - `docs/ai.md` with setup for Claude Code, Gemini CLI and Codex CLI.
    - The Settings switch for AI changes, and the read-only rule in the server's instructions.
-4. **Logs and diagnosis.** JSON logs, `diagnose`, the crash hook.
+4. **Logs and diagnosis, with the old stage 03 folded in.** JSON logs, `diagnose` and the crash hook. Also the deploy view: SMF's output parsed into stages, warnings and errors once, for the window, the CLI and MCP alike.
 5. **The SMF features built so far move onto the engine,** with each one reaching the CLI and MCP.
-6. **The deploy engine (section 6),** then the `mo2` backend and a Cyberpunk 2077 backend.
+6. **Steam's Play button (old stage 05),** built on the CLI: Steam's launch options call `vmm play`.
+7. **Keeping SMF current (old stage 04),** as an engine job. This is where the ban on HTTP and TLS crates changes. It runs after the compatibility-pass workflow exists, so an SMF update can be followed by a pass.
+8. **First tagged release (old stage 06),** once the CLI and the JSON schema have settled, so the first release carries the contract that tools will rely on. There are no intended users for now. Releases stay unsigned until the owner decides otherwise, and the owner wants automatic updates on JASON-PC: the release feeds `jamarq-releases`, and the app updates itself from it.
+9. **The deploy engine (section 6),** then the `mo2` backend and a Cyberpunk 2077 backend.
 
 ## Consequences
 
