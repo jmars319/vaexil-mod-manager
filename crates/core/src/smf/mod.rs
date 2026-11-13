@@ -342,6 +342,10 @@ mod tests {
             releases::version_for("f24f472f0d071c90f293bb67e49b9834d5c01188b3c2d278a3e04af86cd6907b"),
             Some("2.33.42")
         );
+        assert_eq!(
+            releases::version_for("51F94580995879EC189F4E6C129BD856ED34D86CC94B386F0A48087DAB0B11E4"),
+            Some("2.33.45")
+        );
         assert_eq!(releases::version_for("00"), None);
     }
 }
