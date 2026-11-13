@@ -81,6 +81,10 @@ fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
             |name: &str| inline.clone().or_else(|| it.next()).ok_or_else(|| usage(format!("{name} needs a value.")));
         match flag.as_str() {
             "--" => words_only = true,
+            // Flags that take no value refuse one, so --yes=false never confirms.
+            "--json" | "--yes" if inline.is_some() => {
+                return Err(usage(format!("{flag} takes no value. Nothing was changed.")));
+            }
             "--json" => args.json = true,
             "--yes" | "-y" => args.yes = true,
             "-h" | "--help" => args.words.insert(0, "help".into()),

@@ -160,6 +160,13 @@ impl Backend for Smf {
         write::set_load_order(&folder, order, self.backup_dir.as_deref())
     }
 
+    fn stored_options(&self, game: &GameInstall) -> Result<BTreeMap<String, Vec<String>>, VmmError> {
+        let config = read_config(&smf_folder(game)?)?;
+        // An entry that isn't a list of strings is left out: any write
+        // replaces it, as for a mod with no entry.
+        Ok(config.mod_options.keys().filter_map(|id| Some((id.clone(), config.options_of(id)?))).collect())
+    }
+
     fn enable_defaults(
         &self,
         game: &GameInstall,

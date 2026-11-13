@@ -105,7 +105,9 @@ fn mod_label(m: &ModEntry) -> String {
 /// The state a plan's changes meet, one after another.
 struct Simulated {
     order: Vec<String>,
-    chosen: BTreeMap<String, BTreeSet<String>>,
+    /// Each mod's stored options, as stored: absent when none are stored,
+    /// so storing the shown defaults counts as a change, as it is.
+    chosen: BTreeMap<String, Vec<String>>,
     kinds: BTreeMap<String, ModKind>,
 }
 
@@ -274,10 +276,7 @@ impl Engine {
         let find = |id: &str| mods.iter().find(|m| m.id == id).ok_or_else(|| no_such_mod(id));
         let mut sim = Simulated {
             order: enabled_order(mods),
-            chosen: mods
-                .iter()
-                .map(|m| (m.id.clone(), m.options.iter().filter(|o| o.chosen).map(|o| o.value.clone()).collect()))
-                .collect(),
+            chosen: self.backend().stored_options(game)?,
             // A type change needs readable settings: refuse it now rather
             // than after earlier steps have been applied.
             kinds: if changes.iter().any(|c| matches!(c, Change::SetKind { .. })) {
@@ -329,7 +328,7 @@ impl Engine {
                         if !chosen_by_plan.contains_key(mod_id)
                             && let Some(d) = self.backend().enable_defaults(game, mod_id, &sim.order)?
                         {
-                            sim.chosen.insert(mod_id.clone(), d.iter().cloned().collect());
+                            sim.chosen.insert(mod_id.clone(), d.clone());
                             chosen_by_plan.insert(mod_id.clone(), d);
                         }
                         sim.order.insert(at, mod_id.clone());
@@ -352,9 +351,9 @@ impl Engine {
                         VmmError::new(e.code, format!("{}: {} Nothing was changed.", mod_label(m), e.message))
                     })?;
                     chosen_by_plan.insert(mod_id.clone(), resolved.clone());
-                    let new: BTreeSet<String> = resolved.iter().cloned().collect();
-                    let changed = sim.chosen.get(mod_id) != Some(&new);
-                    sim.chosen.insert(mod_id.clone(), new);
+                    // As the write compares: the stored list, exactly.
+                    let changed = sim.chosen.get(mod_id) != Some(&resolved);
+                    sim.chosen.insert(mod_id.clone(), resolved.clone());
                     let list = if resolved.is_empty() { "none".to_string() } else { resolved.join(", ") };
                     PlanStep {
                         description: format!("Choose these options of {}: {list}", mod_label(m)),
@@ -885,6 +884,24 @@ mod tests {
             .unwrap();
         assert_eq!(order.iter().position(|m| m == "C").unwrap() + 1, described, "{order:?}");
         assert_eq!(order, ["C", "B"]);
+    }
+
+    #[test]
+    fn storing_the_shown_defaults_is_a_change() {
+        let (_tmp, game, engine) = setup();
+        // A is on with an option shown chosen by default, and nothing stored.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', options: [{ name: 'X', type: 'checkbox', enabledByDefault: true }] }",
+        )
+        .unwrap();
+        assert!(engine.mod_detail(&game, "A").unwrap().mod_view.options[0].chosen);
+        let set = || Change::SetOptions { mod_id: "A".into(), chosen: vec!["X".into()] };
+        let plan = engine.plan(&game, vec![set()]).unwrap();
+        assert!(plan.steps[0].changes_something, "storing it changes what Deploy.exe applies");
+        assert!(engine.apply_plan(&game, &plan.plan_id).unwrap().steps[0].changes_something);
+        // Stored now, the same choice is already so.
+        assert!(!engine.plan(&game, vec![set()]).unwrap().steps[0].changes_something);
     }
 
     #[test]

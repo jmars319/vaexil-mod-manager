@@ -126,6 +126,7 @@ fn a_change_is_planned_confirmed_and_applied_once() {
     let plan = f.check("plan-enable-b-c", &["plan", "enable", "B", "C"], 0);
     let id = plan["planId"].as_str().unwrap().to_string();
     f.check("apply-without-yes", &["apply", &id], 2);
+    f.check("apply-yes-false", &["apply", &id, "--yes=false"], 2);
     f.check("apply", &["apply", &id, "--yes"], 0);
     f.check("apply-again", &["apply", &id, "--yes"], 3);
     f.check("order-after-apply", &["order"], 0);

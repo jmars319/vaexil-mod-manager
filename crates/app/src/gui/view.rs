@@ -232,6 +232,12 @@ mod tests {
         ) -> Result<Vec<String>, vmm_core::error::VmmError> {
             unreachable!("the view never plans")
         }
+        fn stored_options(
+            &self,
+            _: &GameInstall,
+        ) -> Result<std::collections::BTreeMap<String, Vec<String>>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
         fn enable_defaults(
             &self,
             _: &GameInstall,

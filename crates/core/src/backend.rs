@@ -51,6 +51,11 @@ pub trait Backend {
         load_order: &[String],
     ) -> Result<Vec<String>, VmmError>;
 
+    /// Every mod's stored options, exactly as stored and in stored order. A
+    /// mod with no stored choice is absent; options shown for it are its
+    /// author's defaults, which the framework does not apply until stored.
+    fn stored_options(&self, game: &GameInstall) -> Result<BTreeMap<String, Vec<String>>, VmmError>;
+
     /// The options `set_enabled` would store for `mod_id` if the mods on
     /// were `load_order`: its author's defaults when it has options and no
     /// stored choice yet, otherwise `None` (nothing is stored). Writes nothing.
