@@ -31,7 +31,11 @@ pub fn run() -> i32 {
     g.set_mods(ModelRc::from(rows.clone()));
     g.set_notes(ModelRc::from(notes.clone()));
 
-    let smf = Rc::new(match crate::platform::data_dir() {
+    // Without its own folder the app can't keep a copy of config.json, so
+    // it reads but never writes.
+    let data_dir = crate::platform::data_dir();
+    let can_write = data_dir.is_some();
+    let smf = Rc::new(match data_dir {
         Some(dir) => Smf::with_backups(dir.join("config-backups")),
         None => Smf::default(),
     });
@@ -45,6 +49,9 @@ pub fn run() -> i32 {
             let Some(ui) = weak.upgrade() else { return };
             let game = state.game.borrow().clone();
             let result = match &game {
+                _ if !can_write => Err("Windows didn't say where your local app data folder is (%LOCALAPPDATA%), \
+                                        so there is nowhere to keep a copy of SMF's config.json. Nothing was changed."
+                    .to_string()),
                 Some(game) => state.smf.set_enabled(game, &id, on),
                 None => Err("HITMAN is no longer where it was. Nothing was changed.".to_string()),
             };

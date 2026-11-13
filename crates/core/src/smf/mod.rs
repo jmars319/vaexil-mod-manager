@@ -242,6 +242,29 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
     for m in &mut mods {
         m.load_position = config.load_order.iter().position(|id| *id == m.id).map(|i| i + 1);
     }
+    // An id in the load order that no folder answers to: a mod that was
+    // removed, or one whose manifest broke so its real id can't be read. It
+    // gets a row so it can still be turned off.
+    for (i, id) in config.load_order.iter().enumerate() {
+        if mods.iter().any(|m| m.id == *id) || config.load_order[..i].contains(id) {
+            continue;
+        }
+        mods.push(ModEntry {
+            id: id.clone(),
+            name: id.clone(),
+            version: None,
+            authors: Vec::new(),
+            folder: mods_dir.join(id),
+            badge: None,
+            kind: ModKind::Other,
+            load_position: Some(i + 1),
+            problem: Some(
+                "SMF's load order lists this id, but no mod in the Mods folder has it. Turn it off to take it out \
+                 of the load order."
+                    .into(),
+            ),
+        });
+    }
     mods.sort_by(|a, b| match (a.load_position, b.load_position) {
         (Some(x), Some(y)) => x.cmp(&y),
         (Some(_), None) => std::cmp::Ordering::Less,
@@ -410,6 +433,15 @@ mod tests {
         assert_eq!(order, [Some(1), Some(2), None]);
 
         assert!(smf.set_enabled(&game, "Broken", true).unwrap_err().contains("can't be turned on"));
+
+        // An enabled mod whose manifest breaks keeps a row under its old id,
+        // so it can still be turned off.
+        std::fs::write(smf_folder.join("Mods/Accent Overhaul/manifest.json"), "{ broken").unwrap();
+        let mods = smf.inspect(&game).mods;
+        let orphan = mods.iter().find(|m| m.id == "Someone.Accents").expect("a row for the old id");
+        assert_eq!(orphan.load_position, Some(2));
+        assert!(orphan.problem.as_deref().unwrap().contains("no mod in the Mods folder"));
+        assert!(smf.set_enabled(&game, "Someone.Accents", false).unwrap());
         assert!(smf.set_enabled(&game, "Nobody.Gone", true).unwrap_err().contains("no longer"));
         // A mod whose folder is gone can still be turned off.
         assert!(smf.set_enabled(&game, "Atampy26.RealisticAI", false).unwrap());

@@ -11,6 +11,9 @@
 //!
 //! The previous file is copied to the backup folder before each write, and
 //! the new one replaces it in one rename, so SMF never reads half a file.
+//! Just before the rename the file is read again: if anything else (SMF's
+//! own Mod Manager, a second copy of this app) changed it in the meantime,
+//! nothing is written, so neither change silently undoes the other.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,7 +22,10 @@ use serde_json::{Map, Value};
 
 /// How many earlier copies of `config.json` the backup folder keeps.
 pub const BACKUPS_KEPT: usize = 20;
-const TEMP_NAME: &str = "config.json.vmm-new";
+/// The new file's name while it is written. Each process uses its own.
+fn temp_name() -> String {
+    format!("config.json.vmm-{}.tmp", std::process::id())
+}
 
 /// The options SMF selects when a mod is first turned on: checkbox and
 /// select options marked `enabledByDefault`, stored as SMF stores them
@@ -94,13 +100,33 @@ pub fn set_enabled(
     if let Some(dir) = backup_dir {
         backup(dir, &original)?;
     }
-    let temp = smf_folder.join(TEMP_NAME);
-    let replaced = std::fs::write(&temp, &text).and_then(|()| std::fs::rename(&temp, &path));
-    if let Err(e) = replaced {
-        let _ = std::fs::remove_file(&temp);
-        return Err(format!("Could not save SMF's config.json: {e}. Nothing was changed."));
-    }
+    replace_if_unchanged(&path, &original, &text)?;
     Ok(true)
+}
+
+/// Writes `text` beside `path` and renames it over `path`, unless `path` no
+/// longer holds `original`. The temporary file never outlives the call.
+fn replace_if_unchanged(path: &Path, original: &str, text: &[u8]) -> Result<(), String> {
+    let temp = path.with_file_name(temp_name());
+    let result = std::fs::write(&temp, text)
+        .map_err(|e| format!("Could not save SMF's config.json: {e}. Nothing was changed."))
+        .and_then(|()| {
+            if std::fs::read_to_string(path).ok().as_deref() == Some(original) {
+                Ok(())
+            } else {
+                Err("Another program changed SMF's config.json while this change was being saved. \
+                     Nothing was changed. Try again."
+                    .to_string())
+            }
+        })
+        .and_then(|()| {
+            std::fs::rename(&temp, path)
+                .map_err(|e| format!("Could not save SMF's config.json: {e}. Nothing was changed."))
+        });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Saves `text` as `config-<milliseconds>.json` and keeps the newest
@@ -166,7 +192,7 @@ mod tests {
         assert_eq!(c["runtimePath"], "..\\Runtime");
         assert_eq!(c["modOptions"]["B"], serde_json::json!(["Hands — Signature Suit:Bare hands"]));
         assert_eq!(c["knownMods"], serde_json::json!(["A", "B", "C"]));
-        assert!(!tmp.path().join(TEMP_NAME).exists());
+        assert!(!tmp.path().join(temp_name()).exists());
     }
 
     #[test]
@@ -249,6 +275,21 @@ mod tests {
             assert!(set_enabled(tmp.path(), "C", true, None, None).is_err(), "{bad}");
             assert_eq!(std::fs::read_to_string(tmp.path().join("config.json")).unwrap(), bad);
         }
+    }
+
+    #[test]
+    fn a_change_made_meanwhile_stops_the_write() {
+        let tmp = folder_with("{loadOrder:['Elsewhere']}");
+        let path = tmp.path().join("config.json");
+        // This process read SMF_WRITTEN; another program has saved since.
+        let err = replace_if_unchanged(&path, SMF_WRITTEN, b"{}").unwrap_err();
+        assert!(err.contains("Another program"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{loadOrder:['Elsewhere']}");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1, "the temporary file was left behind");
+
+        replace_if_unchanged(&path, "{loadOrder:['Elsewhere']}", b"{}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
     }
 
     #[test]

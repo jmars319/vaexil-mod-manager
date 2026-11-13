@@ -14,7 +14,7 @@ Early development, nothing released yet. It can now:
 
 - **Find HITMAN** in your Steam libraries, an Epic Games install, or the Microsoft Store's `XboxGames` folders.
 - **Find SMF** in a folder inside the game folder and identify which official release it is.
-- **List your SMF mods** grouped by what they change (Gameplay, Models & Textures, Sound, Dialogue, UI, Text, Other), with each mod's load position, version, authors and any problem reading it. The grouping is worked out from each mod's files and is information only.
+- **List your SMF mods** grouped by what they change (Gameplay, Models & Textures, Sound, Dialogue, UI, Text, Other), with each mod's load position, version, authors and any problem reading it. An id in the load order that no mod answers to gets its own row, so it can be turned off. The grouping is worked out from each mod's files and is information only.
 - **Turn mods on and off** with a switch. This changes the load order in SMF's `config.json` exactly as SMF's own Mod Manager does, after keeping a copy of the old file. The change reaches the game at the next deploy, which is still done in SMF. Everything it writes is listed in the [safety model](docs/safety-model.md).
 
 Mod options, the load order view, setups, deploying and starting the game, and keeping SMF up to date come in later stages on the plan page.

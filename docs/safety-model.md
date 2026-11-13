@@ -24,8 +24,8 @@ Enforcement:
 | What | When | How |
 | --- | --- | --- |
 | SMF's `config.json` | A mod's switch is used in the Mods view. | Only `loadOrder` changes: on appends the mod's id, off removes it. A mod with options that has never had any chosen gets its author's defaults in `modOptions`, as SMF's own Mod Manager does. Every other key, and their order, is kept. The file is written as plain JSON, which SMF reads like the JSON5 it writes itself. |
-| `config.json.vmm-new` in SMF's folder | During that write, for a moment. | The new file is written here first, then renamed over `config.json` in one step, so SMF never reads half a file. It is removed if the rename fails. |
-| `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups\config-<time>.json` | Before every change to `config.json`. | A copy of the file as it was. The newest 20 are kept. If the copy cannot be made, `config.json` is not changed. |
+| `config.json.vmm-<process id>.tmp` in SMF's folder | During that write, for a moment. | The new file is written here first, then renamed over `config.json` in one step, so SMF never reads half a file. Just before the rename `config.json` is read again; if another program (SMF's own Mod Manager, a second copy of this app) changed it meanwhile, nothing is written and the window says to try again. The temporary file is removed whenever the write does not complete. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups\config-<time>.json` | Before every change to `config.json`. | A copy of the file as it was. The newest 20 are kept. If the copy cannot be made, or Windows does not say where `%LOCALAPPDATA%` is, `config.json` is not changed. |
 
 Enforcement:
 
