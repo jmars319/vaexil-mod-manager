@@ -823,7 +823,9 @@ impl Engine {
         })?;
 
         let mut steps = Vec::new();
-        let mut needs_deploy = false;
+        // Whether the game needs a deploy follows from whether the backend's
+        // settings file actually changed, whatever the steps were.
+        let config_before = self.config_hash(game);
         for (i, change) in plan.changes.iter().enumerate() {
             let result = match change {
                 Change::SetEnabled { mod_id, enabled } => self.set_enabled(game, mod_id, *enabled),
@@ -865,14 +867,6 @@ impl Engine {
             };
             match result {
                 Ok(changed) => {
-                    needs_deploy |= changed
-                        && !matches!(
-                            change,
-                            Change::SetKind { .. }
-                                | Change::SaveSetup { .. }
-                                | Change::DeleteSetup { .. }
-                                | Change::EndPass {}
-                        );
                     steps.push(PlanStep { description: plan.steps[i].description.clone(), changes_something: changed });
                 }
                 Err(e) if i == 0 => return Err(e),
@@ -897,7 +891,7 @@ impl Engine {
                 }
             }
         }
-        needs_deploy &= self.backend().capabilities().needs_deploy;
+        let needs_deploy = self.backend().capabilities().needs_deploy && self.config_hash(game) != config_before;
         let journal_problem = self.data_dir().and_then(|dir| {
             journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps, None)
                 .err()
@@ -1511,6 +1505,21 @@ mod tests {
         // Now stored, switching again changes nothing.
         let plan = engine.plan(&game, vec![Change::UseSetup { name: "Bare".into() }]).unwrap();
         assert!(!plan.steps[0].changes_something);
+    }
+
+    #[test]
+    fn marking_a_batch_good_needs_no_deploy() {
+        let (_tmp, game, engine) = setup();
+        let apply = |c: Change| {
+            let plan = engine.plan(&game, vec![c]).unwrap();
+            engine.apply_plan(&game, &plan.plan_id, &Caller::Cli, None).unwrap()
+        };
+        apply(Change::StartPass { from_current: false });
+        assert!(apply(Change::TryBatch { name: String::new(), mods: vec!["B".into()] }).needs_deploy);
+        let good = apply(Change::MarkBatch { good: true, notes: String::new() });
+        assert!(good.steps[0].changes_something, "the pass is saved");
+        assert!(!good.needs_deploy, "the game is as it was tried");
+        assert!(!apply(Change::SaveSetup { name: "S".into() }).needs_deploy);
     }
 
     #[test]
