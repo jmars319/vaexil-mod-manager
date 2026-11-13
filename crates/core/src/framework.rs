@@ -2,6 +2,7 @@
 //! so a second framework can be added without changing it. Version 1 has one
 //! module, [`crate::smf::Smf`].
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::game::GameInstall;
@@ -25,6 +26,36 @@ pub trait Framework {
     /// first to last; anything else is refused. Returns `false` when the order
     /// was already this.
     fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, String>;
+
+    /// The mods that are on, in order, with their chosen options.
+    fn current_setup(&self, game: &GameInstall) -> Result<Setup, String>;
+
+    /// Makes `setup` the framework's state: exactly its mods on, in its order,
+    /// with its options. Mods it names that are no longer installed are left
+    /// out and returned.
+    fn apply_setup(&self, game: &GameInstall, setup: &Setup) -> Result<Vec<String>, String>;
+
+    /// Changes whenever something a deploy reads has changed.
+    fn deploy_fingerprint(&self, game: &GameInstall) -> Result<String, String>;
+
+    /// Runs the framework's own deploy, passing each output line to `on_line`.
+    fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, String>;
+}
+
+/// A saved state: which mods are on, in what order, with what options.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Setup {
+    /// Mod ids, first to last.
+    pub order: Vec<String>,
+    /// Chosen options by mod id, as the framework stores them.
+    pub options: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeployOutcome {
+    pub success: bool,
+    /// `None` when the process was ended without an exit code.
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -23,9 +23,12 @@ Enforcement:
 
 | What | When | How |
 | --- | --- | --- |
-| SMF's `config.json` | A mod's switch is used, Save in a mod's edit sheet with its options changed, or Save in the Load order view. | A switch changes only `loadOrder`: on inserts the mod's id as late as its load rules allow (usually last, as SMF's own Mod Manager does), off removes it. Save in the Load order view replaces `loadOrder` with the same ids in the new order, and refuses if a mod was turned on or off meanwhile. Moves and Auto-sort in that view change nothing until Save. A mod with options that has never had any chosen gets its author's defaults in `modOptions` (leaving out options whose required mods are off), as SMF's own Mod Manager does. Save replaces that mod's `modOptions` entry with the choice, checked against its manifest the way SMF checks it: only checkbox and select options, one per select group, none whose required mods are off. Every other key, and their order, is kept. The file is written as plain JSON, which SMF reads like the JSON5 it writes itself. |
+| SMF's `config.json` | A mod's switch is used, Save in a mod's edit sheet with its options changed, Save in the Load order view, Use on a saved setup, or a step of a compatibility pass (start with every mod off, try a batch, mark it good or bad). | A switch changes only `loadOrder`: on inserts the mod's id as late as its load rules allow (usually last, as SMF's own Mod Manager does), off removes it. Save in the Load order view replaces `loadOrder` with the same ids in the new order, and refuses if a mod was turned on or off meanwhile. Using a setup, or a pass step, replaces `loadOrder` with that setup's mods (any no longer installed are left out and named), and a setup also sets its own mods' `modOptions` entries; other mods' options are kept. Moves and Auto-sort in that view change nothing until Save. A mod with options that has never had any chosen gets its author's defaults in `modOptions` (leaving out options whose required mods are off), as SMF's own Mod Manager does. Save replaces that mod's `modOptions` entry with the choice, checked against its manifest the way SMF checks it: only checkbox and select options, one per select group, none whose required mods are off. Every other key, and their order, is kept. The file is written as plain JSON, which SMF reads like the JSON5 it writes itself. |
 | `config.json.vmm-<process id>.tmp` in SMF's folder | During that write, for a moment. | The new file is written here first, then renamed over `config.json` in one step, so SMF never reads half a file. Just before the rename `config.json` is read again; if another program (SMF's own Mod Manager, a second copy of this app) changed it meanwhile, nothing is written and the window says to try again. The temporary file is removed whenever the write does not complete. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\settings.json` | Save in a mod's edit sheet with its type changed. | The app's own settings: the types you chose, by mod id. Never read by SMF. Written to `settings.json.<process id>.tmp` and renamed over. Keys this version does not know are kept. If the file can't be read, it is never overwritten and type changes are off, with a note in the window. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\setups.json` | Saving or deleting a setup, and each step of a compatibility pass. | Saved setups (mods on, their order and options) and the pass: its baseline, and each batch with its mods, result and notes. Never read by SMF. Written like `settings.json`, and never overwritten when it can't be read. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\deploy-state.json` | When a deploy finishes. | Whether it succeeded, its exit code, its log's path, and a fingerprint of `config.json` and the Mods folder at the start, so the window can tell whether anything changed since. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\logs\deploy-<time>.log` | While a deploy runs. | Every line `Deploy.exe` prints, colour codes removed. The newest 20 are kept. SMF still writes its own `Deploy.log` too. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups\config-<time>.json` | Before every change to `config.json`. | A copy of the file as it was. The newest 20 are kept. If the copy cannot be made, or Windows does not say where `%LOCALAPPDATA%` is, `config.json` is not changed. |
 
 Enforcement:
@@ -36,11 +39,15 @@ Enforcement:
 
 ## Processes
 
-- None are started. SMF's `Deploy.exe` is read for its hash and never run. A switch takes effect in the game at the next deploy, which is still done in SMF.
+- **SMF's own `Deploy.exe`,** when you press Deploy, or Play with changes since the last deploy. It runs exactly as SMF's Mod Manager runs it: `Deploy.exe --doNotPause --colors` from SMF's folder, with no console window, unchanged. Its output goes to the deploy log above. Deploy and Play refuse while `HITMAN3.exe` or another `Deploy.exe` is running (read from the process list).
+- **Steam,** when you press Play on a Steam copy. The app opens `steam://rungameid/1659040`, as Steam's own Play button does. Copies from other stores are not started yet; the window says so.
+- **The log,** when you press Open log: Windows opens it with whatever it uses for text files.
+
+Nothing else is started.
 
 ## Not done, by design
 
 - No network access. CI's dependency policy bans HTTP and TLS crates.
 - No telemetry or accounts.
-- No changes to anything else inside HITMAN's folder or SMF's folder: not SMF's code, mods or deploy output, and no `config.json` key besides `loadOrder` and a first-time `modOptions` entry.
+- No changes to anything else inside HITMAN's folder or SMF's folder by the app itself: not SMF's code or mods, and no `config.json` key besides `loadOrder` and `modOptions`. What `Deploy.exe` writes when it deploys is SMF's own work, as when SMF's Mod Manager runs it. Never a save game.
 - Nothing is ever sent to SMF's authors or its repository.

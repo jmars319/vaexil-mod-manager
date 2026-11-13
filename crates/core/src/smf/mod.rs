@@ -3,6 +3,7 @@
 //! writes, to `config.json` (a mod on or off, a mod's options), live in
 //! [`write`](mod@write). Nothing here runs SMF.
 
+pub mod deploy;
 mod files;
 mod kind;
 pub mod options;
@@ -18,7 +19,9 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::framework::{Framework, Inspection, ModEntry, ModKind, OrderRule, Relation, Status, Version};
+use crate::framework::{
+    DeployOutcome, Framework, Inspection, ModEntry, ModKind, OrderRule, Relation, Setup, Status, Version,
+};
 use crate::game::GameInstall;
 
 /// A file SMF itself keeps in `Mods`; it is not a mod.
@@ -117,6 +120,34 @@ impl Framework for Smf {
     fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, String> {
         let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
         write::set_load_order(&folder, order, self.backup_dir.as_deref())
+    }
+
+    fn current_setup(&self, game: &GameInstall) -> Result<Setup, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        let config = read_config(&folder)?;
+        let options = config.load_order.iter().filter_map(|id| Some((id.clone(), config.options_of(id)?))).collect();
+        Ok(Setup { order: config.load_order, options })
+    }
+
+    fn apply_setup(&self, game: &GameInstall, setup: &Setup) -> Result<Vec<String>, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
+        let installed = |id: &String| mods.iter().any(|m| m.id == *id && m.problem.is_none());
+        let (order, skipped): (Vec<String>, Vec<String>) = setup.order.iter().cloned().partition(|id| installed(id));
+        let options: BTreeMap<String, Vec<String>> =
+            setup.options.iter().filter(|(id, _)| order.contains(id)).map(|(k, v)| (k.clone(), v.clone())).collect();
+        write::update(&folder, self.backup_dir.as_deref(), |c| write::apply_setup(c, &order, &options))?;
+        Ok(skipped)
+    }
+
+    fn deploy_fingerprint(&self, game: &GameInstall) -> Result<String, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        deploy::fingerprint(&folder)
+    }
+
+    fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        deploy::deploy(&folder, on_line)
     }
 
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String> {
@@ -316,7 +347,7 @@ fn read_manifest(path: &Path) -> Result<Manifest, String> {
 /// again when the folder or its manifest changes. Walking every mod's files
 /// takes about a tenth of a second on JASON-PC (19,117 files), too slow for
 /// every refresh. A change deep inside a folder doesn't change the folder's
-/// own time, so file lists are also redone once they are [`FILES_TTL`] old.
+/// own time, so file lists are also redone once they are 30 seconds (`FILES_TTL`) old.
 #[derive(Default)]
 pub struct KindCache {
     kinds: RefCell<HashMap<PathBuf, (KindKey, ModKind)>>,
@@ -777,6 +808,30 @@ mod tests {
         assert!(smf.set_load_order(&game, &reordered).unwrap());
         assert_eq!(order(), reordered);
         assert!(smf.set_load_order(&game, &reordered[..2]).is_err());
+    }
+
+    #[test]
+    fn a_setup_round_trips_and_skips_mods_that_are_gone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let smf_folder = fake_install(tmp.path(), b"deploy");
+        let game = GameInstall { store: Store::Folder, root: tmp.path().to_path_buf() };
+        let smf = Smf::default();
+        let saved = smf.current_setup(&game).unwrap();
+        assert_eq!(saved.order, ["Winter Suit", "Atampy26.RealisticAI"]);
+
+        let wanted = Setup {
+            order: vec!["Someone.Accents".into(), "Gone.Mod".into(), "Winter Suit".into()],
+            options: BTreeMap::from([("Someone.Accents".into(), vec!["Loud".into()]), ("Gone.Mod".into(), vec![])]),
+        };
+        assert_eq!(smf.apply_setup(&game, &wanted).unwrap(), ["Gone.Mod"]);
+        let now = smf.current_setup(&game).unwrap();
+        assert_eq!(now.order, ["Someone.Accents", "Winter Suit"]);
+        assert_eq!(now.options.get("Someone.Accents"), Some(&vec!["Loud".to_string()]));
+        let config = std::fs::read_to_string(smf_folder.join("config.json")).unwrap();
+        assert!(config.contains("skipIntro") && !config.contains("Gone.Mod"), "{config}");
+
+        smf.apply_setup(&game, &saved).unwrap();
+        assert_eq!(smf.current_setup(&game).unwrap().order, saved.order);
     }
 
     #[test]

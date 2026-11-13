@@ -18,8 +18,11 @@ Early development, nothing released yet. It can now:
 - **Turn mods on and off** with a switch. This changes the load order in SMF's `config.json` exactly as SMF's own Mod Manager does, after keeping a copy of the old file. The change reaches the game at the next deploy, which is still done in SMF. Everything it writes is listed in the [safety model](docs/safety-model.md).
 - **Set the load order** in the Load order view: drag a row or use Up and Down, or Auto-sort by the mods' own `loadBefore`/`loadAfter` rules. Broken rules, and mods whose files replace another's, are shown on both views. Nothing is saved until Save.
 - **Change a mod's options and type** in its edit sheet. Options are saved to SMF's `config.json` as SMF's own Mod Manager saves them, after keeping a copy. The type only regroups the Mods view and is kept in the app's own `settings.json`.
+- **Keep setups:** save the mods that are on, in their order and with their options, and switch between saved setups.
+- **Run a compatibility pass** after a game update: start with every mod off or from the mods on now, try small batches, and mark each good (it joins the baseline) or bad (the game goes back to the baseline). Saves are never touched.
+- **Deploy and Play:** run SMF's own `Deploy.exe` unchanged, with its output in a log, and start HITMAN through Steam. Deploy and Play refuse while the game is running.
 
-Setups, deploying and starting the game, and keeping SMF up to date come in later stages on the plan page.
+The command line and AI connection (ADR 0003), keeping SMF current, and Steam's own Play button come in later stages on the plan page.
 
 ## Build from source
 
