@@ -37,6 +37,18 @@ pub trait Backend {
     /// [`ModOption::value`]s. Returns `false` when nothing changed.
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError>;
 
+    /// The options `set_options` would store for `chosen` if the mods on
+    /// were `load_order`: checked, in the mod's order, with every select
+    /// group filled. Writes nothing; plans use it to describe exactly what
+    /// will be written.
+    fn resolve_options(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        chosen: &[String],
+        load_order: &[String],
+    ) -> Result<Vec<String>, VmmError>;
+
     /// Saves a new load order. It must hold exactly the mods that are on now,
     /// first to last; anything else is refused. Returns `false` when the order
     /// was already this.

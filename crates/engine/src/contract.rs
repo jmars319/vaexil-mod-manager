@@ -119,7 +119,12 @@ impl Engine {
                     format!("{} isn't a HITMAN folder: it has no Retail\\HITMAN3.exe.", folder.display()),
                 ));
             }
-            return Ok(GameInstall { store: vmm_core::game::Store::Folder, root: folder.to_path_buf() });
+            // Absolute, so a plan names the same folder whatever the
+            // current directory is when it is applied.
+            let root = std::path::absolute(folder).map_err(|e| {
+                VmmError::new(ErrorCode::GameNotFound, format!("{} can't be used: {e}", folder.display()))
+            })?;
+            return Ok(GameInstall { store: vmm_core::game::Store::Folder, root });
         }
         self.installs().into_iter().next().ok_or_else(|| {
             VmmError::new(ErrorCode::GameNotFound, "No install of HITMAN World of Assassination was found.")
@@ -302,38 +307,16 @@ impl Engine {
                 }
                 Change::SetOptions { mod_id, chosen } => {
                     let m = find(mod_id)?;
-                    let mut groups = BTreeSet::new();
-                    for value in chosen {
-                        let o = m.options.iter().find(|o| &o.value == value).ok_or_else(|| {
-                            VmmError::new(
-                                ErrorCode::OptionInvalid,
-                                format!("{} has no option \u{201c}{value}\u{201d}. Nothing was changed.", mod_label(m)),
-                            )
-                        })?;
-                        if let Some(g) = &o.group
-                            && !groups.insert(g.clone())
-                        {
-                            return Err(VmmError::new(
-                                ErrorCode::OptionInvalid,
-                                format!("Only one choice of \u{201c}{g}\u{201d} can be chosen. Nothing was changed."),
-                            ));
-                        }
-                        let off: Vec<&String> = o.needs.iter().filter(|n| !sim.order.contains(n)).collect();
-                        if !off.is_empty() {
-                            return Err(VmmError::new(
-                                ErrorCode::OptionRequirementOff,
-                                format!(
-                                    "\u{201c}{}\u{201d} needs {} turned on first. Nothing was changed.",
-                                    o.label,
-                                    off.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-                                ),
-                            ));
-                        }
-                    }
-                    let new: BTreeSet<String> = chosen.iter().cloned().collect();
+                    // What the backend would store with the mods on at this
+                    // point of the plan: requirements checked against that,
+                    // select groups filled as applying will fill them.
+                    let resolved = self.backend().resolve_options(game, mod_id, chosen, &sim.order).map_err(|e| {
+                        VmmError::new(e.code, format!("{}: {} Nothing was changed.", mod_label(m), e.message))
+                    })?;
+                    let new: BTreeSet<String> = resolved.iter().cloned().collect();
                     let changed = sim.chosen.get(mod_id) != Some(&new);
                     sim.chosen.insert(mod_id.clone(), new);
-                    let list = if chosen.is_empty() { "none".to_string() } else { chosen.join(", ") };
+                    let list = if resolved.is_empty() { "none".to_string() } else { resolved.join(", ") };
                     PlanStep {
                         description: format!("Choose these options of {}: {list}", mod_label(m)),
                         changes_something: changed,
@@ -618,6 +601,67 @@ mod tests {
                 ],
             )
             .unwrap();
+    }
+
+    /// Adds mod D, whose option needs A, and mod E, with a select group.
+    fn with_option_mods(game: &GameInstall) {
+        let mods = game.root.join("Simple Mod Framework").join("Mods");
+        for (id, options) in [
+            ("D", "[{ name: 'Y', type: 'checkbox', requirements: ['A'] }]"),
+            (
+                "E",
+                "[{ name: 'P', type: 'select', group: 'G' }, { name: 'Q', type: 'select', group: 'G', enabledByDefault: true }]",
+            ),
+        ] {
+            std::fs::create_dir_all(mods.join(id)).unwrap();
+            std::fs::write(
+                mods.join(id).join("manifest.json"),
+                format!("{{ id: '{id}', name: '{id}', options: {options} }}"),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn option_steps_meet_the_state_the_plan_leaves() {
+        let (_tmp, game, engine) = setup();
+        with_option_mods(&game);
+        let y = || Change::SetOptions { mod_id: "D".into(), chosen: vec!["Y".into()] };
+        // A is on now, so Y is fine on its own...
+        engine.plan(&game, vec![y()]).unwrap();
+        // ...but not after the same plan has turned A off.
+        let err = engine.plan(&game, vec![Change::SetEnabled { mod_id: "A".into(), enabled: false }, y()]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OptionRequirementOff);
+        // An empty choice for a select group is described as what applying
+        // writes: the group's default.
+        let plan = engine.plan(&game, vec![Change::SetOptions { mod_id: "E".into(), chosen: vec![] }]).unwrap();
+        assert!(plan.steps[0].description.ends_with(": G:Q"), "{}", plan.steps[0].description);
+    }
+
+    #[test]
+    fn a_relative_game_folder_is_made_absolute() {
+        let (tmp, _game, engine) = setup();
+        let cwd = std::env::current_dir().unwrap();
+        let relative = pathdiff(&tmp.path().join("game"), &cwd);
+        let game = engine.pick_game(Some(&relative)).unwrap();
+        assert!(game.root.is_absolute(), "{}", game.root.display());
+    }
+
+    /// `to` relative to `from` when they share a drive; otherwise `to`.
+    fn pathdiff(to: &Path, from: &Path) -> PathBuf {
+        let (to_parts, from_parts): (Vec<_>, Vec<_>) = (to.components().collect(), from.components().collect());
+        if to_parts.first() != from_parts.first() {
+            return to.to_path_buf();
+        }
+        let common = to_parts.iter().zip(&from_parts).take_while(|(a, b)| a == b).count();
+        let mut out = PathBuf::new();
+        for _ in common..from_parts.len() {
+            out.push("..");
+        }
+        for c in &to_parts[common..] {
+            out.push(c.as_os_str());
+        }
+        out
     }
 
     #[test]

@@ -195,6 +195,19 @@ impl Backend for Smf {
 
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError> {
         let folder = smf_folder(game)?;
+        let config = read_config(&folder)?;
+        let values = self.resolve_options(game, mod_id, chosen, &config.load_order)?;
+        write::set_options(&folder, mod_id, &values, self.backup_dir.as_deref())
+    }
+
+    fn resolve_options(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        chosen: &[String],
+        load_order: &[String],
+    ) -> Result<Vec<String>, VmmError> {
+        let folder = smf_folder(game)?;
         let m = self.find_mod(&folder, mod_id)?;
         if let Some(problem) = &m.problem {
             return Err(VmmError::new(C::ModUnreadable, format!("{}'s options can't be changed. {problem}", m.name)));
@@ -202,10 +215,7 @@ impl Backend for Smf {
         if m.badge.as_deref() == Some("RPKG") {
             return Err(VmmError::new(C::OptionInvalid, format!("{} is an RPKG mod, which has no options.", m.name)));
         }
-        let manifest = manifest_of(&m)?;
-        let config = read_config(&folder)?;
-        let values = options::validate(&manifest.options, chosen, &config.load_order)?;
-        write::set_options(&folder, mod_id, &values, self.backup_dir.as_deref())
+        options::validate(&manifest_of(&m)?.options, chosen, load_order)
     }
 }
 

@@ -223,6 +223,15 @@ mod tests {
         fn set_options(&self, _: &GameInstall, _: &str, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }
+        fn resolve_options(
+            &self,
+            _: &GameInstall,
+            _: &str,
+            _: &[String],
+            _: &[String],
+        ) -> Result<Vec<String>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
         fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }
