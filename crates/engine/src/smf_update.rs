@@ -39,10 +39,18 @@ const UPDATING_STALE_MS: u64 = 2 * 60 * 60 * 1000;
 
 /// Whether an SMF update is running (in any of the app's processes).
 pub fn updating(data: &Path) -> bool {
-    std::fs::read_to_string(data.join(UPDATING))
-        .ok()
-        .and_then(|t| t.trim().parse::<u64>().ok())
-        .is_some_and(|t| deploy::now_ms().saturating_sub(t) < UPDATING_STALE_MS)
+    let path = data.join(UPDATING);
+    // One read decides: a fresh time is a live update; an old one was left
+    // by a crash; none yet is a marker being created, live while it is new.
+    match std::fs::read_to_string(&path).ok() {
+        None => false,
+        Some(text) => match text.trim().parse::<u64>() {
+            Ok(t) => deploy::now_ms().saturating_sub(t) < UPDATING_STALE_MS,
+            Err(_) => std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t.elapsed().is_ok_and(|d| d.as_millis() < 10_000)),
+        },
+    }
 }
 
 /// Removes the marker when the update ends, however it ends.
@@ -64,15 +72,6 @@ impl Marker {
                     if updating(data) {
                         break;
                     }
-                    // Left by a crash, or being written this instant: a
-                    // marker with no time yet is only taken once it is old.
-                    let timed = std::fs::read_to_string(&path).is_ok_and(|t| t.trim().parse::<u64>().is_ok());
-                    let young = std::fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .is_ok_and(|t| t.elapsed().is_ok_and(|d| d.as_millis() < 10_000));
-                    if !timed && young {
-                        break;
-                    }
                     let _ = std::fs::remove_file(&path);
                 }
                 Err(e) => {
@@ -86,7 +85,13 @@ impl Marker {
 impl Marker {
     /// Restamps the marker, so a long update isn't taken for a crashed one.
     fn refresh(&self) {
-        let _ = std::fs::write(&self.0, deploy::now_ms().to_string());
+        // Written beside it and moved over it, so a reader never sees it
+        // empty. If a reader holds it open the move fails and the old time
+        // stays, which is still fresh.
+        let next = self.0.with_extension("next");
+        if std::fs::write(&next, deploy::now_ms().to_string()).is_ok() && std::fs::rename(&next, &self.0).is_err() {
+            let _ = std::fs::remove_file(&next);
+        }
     }
 }
 impl Drop for Marker {
@@ -410,6 +415,8 @@ mod tests {
         let taken = Marker::take(tmp.path()).expect("an old marker is taken over");
         assert!(updating(tmp.path()));
         assert_eq!(Marker::take(tmp.path()).unwrap_err().code, ErrorCode::SmfUpdating, "only one update at a time");
+        taken.refresh();
+        assert!(updating(tmp.path()));
         drop(taken);
         assert!(!marker.exists());
     }
