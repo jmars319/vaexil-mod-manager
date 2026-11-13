@@ -32,6 +32,66 @@ pub const CHECK_EVERY_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// Processes that stop an update: the game, a deploy, SMF's own Mod Manager.
 const BLOCKERS: [&str; 3] = ["HITMAN3.exe", "Deploy.exe", "Mod Manager.exe"];
+/// Present while an update runs, so Deploy and Play wait for it.
+const UPDATING: &str = "smf-updating";
+/// After this long a marker is taken to be left by a crash.
+const UPDATING_STALE_MS: u64 = 2 * 60 * 60 * 1000;
+
+/// Whether an SMF update is running (in any of the app's processes).
+pub fn updating(data: &Path) -> bool {
+    std::fs::read_to_string(data.join(UPDATING))
+        .ok()
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .is_some_and(|t| deploy::now_ms().saturating_sub(t) < UPDATING_STALE_MS)
+}
+
+/// Removes the marker when the update ends, however it ends.
+struct Marker(PathBuf);
+impl Drop for Marker {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Refuses while the game, a deploy or SMF's Mod Manager runs.
+fn check_processes() -> Result<(), VmmError> {
+    match host::running(&BLOCKERS).first() {
+        Some(name) => Err(VmmError::new(
+            if name.eq_ignore_ascii_case("HITMAN3.exe") { ErrorCode::GameRunning } else { ErrorCode::DeployRunning },
+            format!("{name} is running. Close it, then update SMF. Nothing was changed."),
+        )),
+        None => Ok(()),
+    }
+}
+
+/// What an update needs that doesn't come from the network.
+#[derive(Debug, Clone)]
+pub struct UpdateBase {
+    pub installed: String,
+    pub smf_folder: PathBuf,
+    pub data_dir: PathBuf,
+}
+
+/// Asks GitHub for the newest release (network: run it off the window's
+/// thread), and returns the job, or `None` when SMF is the newest.
+pub fn plan(base: UpdateBase) -> Result<Option<UpdateJob>, VmmError> {
+    let (_, found) = check(&base.data_dir, &base.installed)?;
+    if found.held {
+        return Err(VmmError::new(
+            ErrorCode::SmfUpdateHeld,
+            format!(
+                "SMF's release notes say a newer release ({}) can't be applied automatically. Nothing was changed.",
+                found.newer.join(", ")
+            ),
+        ));
+    }
+    Ok(found.latest.map(|release| UpdateJob {
+        installed: base.installed,
+        release,
+        smf_folder: base.smf_folder,
+        data_dir: base.data_dir,
+    }))
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +143,11 @@ pub fn check(data: &Path, installed: &str) -> Result<(LastCheck, update::UpdateC
 /// Downloads, checks, and applies the update. `progress` gets a line for
 /// people as it goes.
 pub fn run(job: &UpdateJob, progress: &mut dyn FnMut(String)) -> Result<String, VmmError> {
+    check_processes()?;
+    let marker = job.data_dir.join(UPDATING);
+    std::fs::write(&marker, deploy::now_ms().to_string())
+        .map_err(|e| VmmError::new(ErrorCode::SaveFailed, format!("Couldn't start the update: {e}")))?;
+    let _marker = Marker(marker);
     let want = job.release.sha256.clone().ok_or_else(|| {
         VmmError::new(
             ErrorCode::DownloadMismatch,
@@ -119,6 +184,8 @@ pub fn run(job: &UpdateJob, progress: &mut dyn FnMut(String)) -> Result<String, 
     let staging = dir.join("staging");
     update::extract(&zip, &staging)?;
     update::prune(&staging)?;
+    // The download can take minutes: check again just before installing.
+    check_processes()?;
     let backups = job.data_dir.join("smf-backups");
     let backup = backups.join(format!("{}-{:015}", job.installed, deploy::now_ms()));
     progress("Installing (a copy of every replaced file is kept)".into());
@@ -233,16 +300,15 @@ impl Engine {
     /// Checks it is safe to update now, asks GitHub, and returns the job, or
     /// `None` when SMF is already the newest.
     pub fn prepare_smf_update(&self, game: &GameInstall) -> Result<Option<UpdateJob>, VmmError> {
-        let running = host::running(&BLOCKERS);
-        if let Some(name) = running.first() {
-            return Err(VmmError::new(
-                if name.eq_ignore_ascii_case("HITMAN3.exe") {
-                    ErrorCode::GameRunning
-                } else {
-                    ErrorCode::DeployRunning
-                },
-                format!("{name} is running. Close it, then update SMF. Nothing was changed."),
-            ));
+        plan(self.smf_update_base(game)?)
+    }
+
+    /// The local checks before an update (no network): nothing running,
+    /// SMF found and named.
+    pub fn smf_update_base(&self, game: &GameInstall) -> Result<UpdateBase, VmmError> {
+        check_processes()?;
+        if self.data_dir().is_some_and(updating) {
+            return Err(VmmError::new(ErrorCode::SmfUpdating, "SMF is already being updated."));
         }
         if self.deploy_progress().0 {
             return Err(VmmError::new(ErrorCode::DeployRunning, "A deploy is running. Nothing was changed."));
@@ -258,17 +324,7 @@ impl Engine {
                 "The installed SMF isn't a release this app can name, so it won't replace it automatically.",
             )
         })?;
-        let (_, found) = check(data, &installed)?;
-        if found.held {
-            return Err(VmmError::new(
-                ErrorCode::SmfUpdateHeld,
-                format!(
-                    "SMF's release notes say a newer release ({}) can't be applied automatically. Nothing was changed.",
-                    found.newer.join(", ")
-                ),
-            ));
-        }
-        Ok(found.latest.map(|release| UpdateJob { installed, release, smf_folder, data_dir: data.to_path_buf() }))
+        Ok(UpdateBase { installed, smf_folder, data_dir: data.to_path_buf() })
     }
 
     /// Records how an update ended, as the window and `vmm` do once it has.
@@ -298,5 +354,18 @@ mod tests {
             std::fs::read_dir(&b).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         left.sort();
         assert_eq!(left, ["2.33.44-000000000000001", "2.33.45-000000000000002"]);
+    }
+
+    #[test]
+    fn a_fresh_marker_blocks_and_an_old_one_does_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!updating(tmp.path()));
+        let marker = tmp.path().join(UPDATING);
+        std::fs::write(&marker, deploy::now_ms().to_string()).unwrap();
+        assert!(updating(tmp.path()));
+        std::fs::write(&marker, (deploy::now_ms() - UPDATING_STALE_MS - 1).to_string()).unwrap();
+        assert!(!updating(tmp.path()), "left by a crash");
+        drop(Marker(marker.clone()));
+        assert!(!marker.exists());
     }
 }

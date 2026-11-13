@@ -445,6 +445,9 @@ impl Engine {
     /// Why a deploy or Play can't start now (the game, or another deploy, is
     /// running), if it can't.
     pub fn blocker(&self) -> Option<VmmError> {
+        if self.data_dir.as_deref().is_some_and(smf_update::updating) {
+            return Some(VmmError::new(ErrorCode::SmfUpdating, "SMF is being updated. Wait for it to finish."));
+        }
         deploy::blocked(&host::running(&deploy::BLOCKERS))
     }
 
@@ -564,6 +567,12 @@ const PLAY_AS_IS_MS: u64 = 2 * 60 * 1000;
 impl Engine {
     /// Refuses while a deploy is writing the game's files.
     pub fn check_no_deploy(&self) -> Result<(), VmmError> {
+        if self.data_dir.as_deref().is_some_and(smf_update::updating) {
+            return Err(VmmError::new(
+                ErrorCode::SmfUpdating,
+                "SMF is being updated. Wait for it to finish, then play.",
+            ));
+        }
         if self.deploy_progress().0 || !host::running(&["Deploy.exe"]).is_empty() {
             return Err(VmmError::new(
                 ErrorCode::DeployRunning,

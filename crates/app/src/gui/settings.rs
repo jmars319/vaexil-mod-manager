@@ -344,23 +344,25 @@ fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
             let ss = ui.global::<SettingsState>();
             ss.set_smf_confirming(false);
             let Some(game) = state.game.borrow().clone() else { return };
-            let job = match state.engine.prepare_smf_update(&game) {
-                Ok(Some(job)) => job,
-                Ok(None) => {
-                    show_smf(&ui, &state);
-                    note(&ui, "SMF is already the newest.".into(), false);
-                    return;
-                }
+            // The local checks here; the network on the worker thread.
+            let base = match state.engine.smf_update_base(&game) {
+                Ok(b) => b,
                 Err(e) => {
                     note(&ui, e.message, true);
                     return;
                 }
             };
             ss.set_smf_busy(true);
+            note(&ui, "Asking SMF's GitHub page for the newest release…".into(), false);
             let state = state.clone();
             in_background(
                 &ui,
-                move |line| vmm_engine::smf_update::run(&job, &mut |l| line(l)),
+                move |line| -> Result<String, vmm_core::error::VmmError> {
+                    match vmm_engine::smf_update::plan(base)? {
+                        Some(job) => vmm_engine::smf_update::run(&job, &mut |l| line(l)),
+                        None => Ok("SMF is already the newest.".into()),
+                    }
+                },
                 move |ui, r| {
                     ui.global::<SettingsState>().set_smf_busy(false);
                     if let Some(game) = state.game.borrow().clone() {

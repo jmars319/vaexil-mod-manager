@@ -196,6 +196,13 @@
       "hint": "Read SMF's release notes and update it by hand, as SMF's own Mod Manager would ask you to.",
       "retryable": false,
       "exitCode": 3
+    },
+    {
+      "code": "smf.updating",
+      "meaning": "SMF is being updated.",
+      "hint": "Wait for the update to finish, then try again.",
+      "retryable": true,
+      "exitCode": 5
     }
   ]
 }

@@ -214,7 +214,9 @@ pub fn apply(staging: &Path, folder: &Path, backup: &Path) -> Result<usize, VmmE
     let mut written: Vec<&PathBuf> = Vec::new();
     for rel in &incoming {
         if let Err(e) = copy(&staging.join(rel), &folder.join(rel)) {
-            // Put back what was replaced, and remove what was new.
+            // Put back what was replaced, and remove what was new, including
+            // the file whose copy failed partway.
+            written.push(rel);
             for done in &written {
                 let saved = backup.join(done);
                 let _ = if saved.is_file() {
