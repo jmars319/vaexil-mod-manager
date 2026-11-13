@@ -1,0 +1,136 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LogEvent"
+      },
+      "description": "Newest last."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "events"
+  ],
+  "title": "LogList",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "LogEvent": {
+      "type": "object",
+      "properties": {
+        "tsMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Milliseconds since 1970 (UTC)."
+        },
+        "level": {
+          "$ref": "#/$defs/LogLevel"
+        },
+        "event": {
+          "type": "string",
+          "description": "What happened, such as `mod.enabled`, `plan.applied` or `deploy.finished`."
+        },
+        "caller": {
+          "type": "string",
+          "description": "Who made it happen: `gui`, `cli` or `mcp:<AI app name>`."
+        },
+        "game": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The plan, when the event is part of one."
+        },
+        "message": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorBody"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the event is a failure."
+        }
+      },
+      "required": [
+        "tsMs",
+        "level",
+        "event",
+        "caller",
+        "message"
+      ],
+      "description": "One line of the app's event log (`logs\\vmm-<date>.jsonl`)."
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warn",
+        "error"
+      ],
+      "description": "How serious a logged event is."
+    },
+    "ErrorBody": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable code, such as `config.changed_meanwhile`."
+        },
+        "message": {
+          "type": "string",
+          "description": "What went wrong and what was (not) changed, for people."
+        },
+        "hint": {
+          "type": "string",
+          "description": "What to do about it."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether trying again later, without changing anything, can work."
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The process exit code `vmm` uses for this error."
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "hint",
+        "retryable",
+        "exitCode"
+      ]
+    }
+  }
+}

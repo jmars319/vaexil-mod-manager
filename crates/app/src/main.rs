@@ -11,6 +11,7 @@ const USAGE: &str =
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    vmm_engine::crash::install(vmm_engine::host::data_dir(), "gui".into());
     let code = match args.first().map(String::as_str) {
         None => gui::run(),
         Some("--version") => {

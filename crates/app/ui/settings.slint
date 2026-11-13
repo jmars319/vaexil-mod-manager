@@ -26,6 +26,10 @@ export global SettingsState {
     in property <string> claude-command;
     in property <string> gemini-command;
     in property <string> codex-command;
+    // Filled just before "Copy diagnostics" copies it.
+    in property <string> diagnostics;
+    in property <string> diagnostics-note;
+    callback make-diagnostics();
 }
 
 component CommandLine inherits VerticalLayout {
@@ -192,6 +196,44 @@ export component SettingsSheet inherits Sheet {
                 CommandLine { app: "Claude Code"; command: SettingsState.claude-command; }
                 CommandLine { app: "Gemini CLI"; command: SettingsState.gemini-command; }
                 CommandLine { app: "Codex CLI"; command: SettingsState.codex-command; }
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+                FieldLabel { text: "Diagnostics"; }
+                Text {
+                    text: "Copies everything needed to look into a problem: how the game was found, current problems, the last deploy, recent events and settings, as JSON. Paths in your user folder start with ~.";
+                    font-size: 12px;
+                    color: Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 10px;
+                    Button {
+                        text: "Copy diagnostics";
+                        clicked => {
+                            SettingsState.make-diagnostics();
+                            diag-field.select-all();
+                            diag-field.copy();
+                            diag-field.clear-selection();
+                        }
+                    }
+                    if SettingsState.diagnostics-note != "": Text {
+                        text: SettingsState.diagnostics-note;
+                        font-size: 12px;
+                        color: Theme.ready;
+                        vertical-alignment: center;
+                    }
+                }
+                // Holds the text only to copy it; never shown.
+                diag-field := TextInput {
+                    visible: false;
+                    height: 0px;
+                    text: SettingsState.diagnostics;
+                    read-only: true;
+                    accessible-role: none;
+                }
             }
 
             if SettingsState.note != "": Text {

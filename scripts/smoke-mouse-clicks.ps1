@@ -263,6 +263,16 @@ try {
     $log = Get-ChildItem (Join-Path $data 'logs') -Filter 'deploy-*.log' -ErrorAction SilentlyContinue | Select-Object -First 1
     $logText = if ($log) { Get-Content $log.FullName -Raw } else { '' }
     Check 'deploy: the log has the output and SMF''s flags' ($logText -match 'Done in 1s' -and $logText -match '--doNotPause --colors' -and $logText -match 'A warning on stderr')
+    # The report reads that log: one raw-entity warning counted once, and
+    # the stderr line as a warning it doesn't recognise.
+    Click $window (Find-Control $window 'Show the last deploy report')
+    Start-Sleep -Milliseconds 600
+    $outcome = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+        Where-Object { $_.Current.Name -like 'The last deploy succeeded*' } | Select-Object -First 1
+    Check 'report: the deploy succeeded' ([bool]$outcome)
+    Check 'report: a repeated warning counts once' ([bool](Find-Control $window 'Smoke Mod 01: once'))
+    Click $window (Find-Control $window 'Close the deploy report')
+    Start-Sleep -Milliseconds 400
     Click $window (Find-Control $window 'Smoke Mod 03')
     Check 'deploy: a change shows as changes since the deploy' ([bool](Wait-Name 'Deploy status: Changes since the last deploy. Deploy, or Play, to put them in the game.' 8))
 
@@ -334,6 +344,14 @@ try {
     Click $window (Find-Control $window 'Let AI tools make changes')
     Start-Sleep -Milliseconds 500
     Check 'settings: a second click turns them off' (-not (& $aiOn))
+    # "Copy diagnostics" replaces the clipboard, so only on CI, never on a
+    # developer's machine.
+    if ($env:CI) {
+        Click $window (Find-Control $window 'Copy diagnostics')
+        Start-Sleep -Milliseconds 800
+        $copied = try { Get-Clipboard -Raw | ConvertFrom-Json } catch { $null }
+        Check 'settings: Copy diagnostics copies the JSON' ($copied -and $copied.schemaVersion -eq 1 -and $copied.status.installed -gt 0)
+    }
     Click $window (Find-Control $window 'Close settings')
     Start-Sleep -Milliseconds 400
 } finally {

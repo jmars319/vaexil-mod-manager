@@ -17,8 +17,8 @@ use vmm_core::error::{ErrorCode, VmmError};
 use vmm_core::game::GameInstall;
 use vmm_core::schema::{
     ApplyReport, BackendState, BackendView, BrokenRuleView, Change, DeployState, GameList, GameView, KindSource,
-    ModDetail, ModList, ModView, OptionView, OrderReport, Plan, PlanStep, Precondition, RelationView, SCHEMA_VERSION,
-    StatusReport,
+    LogLevel, ModDetail, ModList, ModView, OptionView, OrderReport, Plan, PlanStep, Precondition, RelationView,
+    SCHEMA_VERSION, StatusReport,
 };
 
 use crate::journal::{self, Caller};
@@ -426,6 +426,23 @@ impl Engine {
     /// Checks `changes` and saves them as a plan to apply with
     /// [`Engine::apply_plan`]. Changes nothing in the game.
     pub fn plan(&self, game: &GameInstall, changes: Vec<Change>) -> Result<Plan, VmmError> {
+        let r = self.plan_inner(game, changes);
+        match &r {
+            Ok(p) => self.log_plan(
+                LogLevel::Info,
+                "plan.made",
+                Some(game),
+                None,
+                Some(&p.plan_id),
+                format!("Planned {} step(s).", p.steps.len()),
+                None,
+            ),
+            Err(e) => self.log(LogLevel::Error, "plan.made", Some(game), None, e.message.clone(), Some(e)),
+        }
+        r
+    }
+
+    fn plan_inner(&self, game: &GameInstall, changes: Vec<Change>) -> Result<Plan, VmmError> {
         let dir = self.plans_dir()?;
         let steps = self.check(game, &changes)?;
         let preconditions = self.preconditions(game, &changes)?;
@@ -482,6 +499,34 @@ impl Engine {
     /// must pass the user's `request` it acts on, and is refused while
     /// Settings' "Let AI tools make changes" is off.
     pub fn apply_plan(
+        &self,
+        game: &GameInstall,
+        plan_id: &str,
+        caller: &Caller,
+        request: Option<&str>,
+    ) -> Result<ApplyReport, VmmError> {
+        let r = self.apply_plan_inner(game, plan_id, caller, request);
+        let id = Some(plan_id).filter(|id| valid_plan_id(id));
+        match &r {
+            Ok(rep) => {
+                let changed = rep.steps.iter().filter(|s| s.changes_something).count();
+                let asked = request.map(|q| format!(" Asked for: \u{201c}{}\u{201d}", q.trim())).unwrap_or_default();
+                self.log_plan(
+                    LogLevel::Info,
+                    "plan.applied",
+                    Some(game),
+                    None,
+                    id,
+                    format!("Applied a plan: {changed} of {} step(s) changed something.{asked}", rep.steps.len()),
+                    None,
+                )
+            }
+            Err(e) => self.log_plan(LogLevel::Error, "plan.applied", Some(game), None, id, e.message.clone(), Some(e)),
+        }
+        r
+    }
+
+    fn apply_plan_inner(
         &self,
         game: &GameInstall,
         plan_id: &str,

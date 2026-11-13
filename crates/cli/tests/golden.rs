@@ -73,7 +73,8 @@ impl Fixture {
             Value::Object(o) => {
                 for (k, x) in o.iter_mut() {
                     match k.as_str() {
-                        "planId" | "createdAtMs" | "expiresAtMs" | "sha256" | "busy" | "appVersion" => {
+                        "planId" | "plan" | "createdAtMs" | "expiresAtMs" | "sha256" | "busy" | "appVersion"
+                        | "tsMs" => {
                             if !x.is_null() {
                                 *x = Value::String(format!("<{k}>"));
                             }
@@ -130,6 +131,8 @@ fn a_change_is_planned_confirmed_and_applied_once() {
     f.check("apply", &["apply", &id, "--yes"], 0);
     f.check("apply-again", &["apply", &id, "--yes"], 3);
     f.check("order-after-apply", &["order"], 0);
+    // Every change and failure so far, from the command line.
+    f.check("logs-after-apply", &["logs"], 0);
     f.check("plan-bad-order", &["plan", "order", "C", "A"], 3);
     f.check("plan-bad-kind", &["plan", "kind", "A", "loud"], 2);
 }

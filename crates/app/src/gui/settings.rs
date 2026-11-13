@@ -80,6 +80,7 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
             ss.set_note("".into());
             ss.set_note_error(false);
             ss.set_ai_note("".into());
+            ss.set_diagnostics_note("".into());
             show(&ui, &state);
             ui.global::<Ui>().set_sheet("settings".into());
         });
@@ -121,6 +122,17 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
             };
             ss.set_ai_note(note.into());
             ss.set_ai_changes(state.engine.ai_changes_allowed());
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        ss.on_make_diagnostics(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let ss = ui.global::<SettingsState>();
+            let game = state.game.borrow().clone();
+            let d = state.engine.diagnose(game.as_ref());
+            ss.set_diagnostics(serde_json::to_string_pretty(&d).unwrap_or_default().into());
+            ss.set_diagnostics_note("Copied.".into());
         });
     }
     {

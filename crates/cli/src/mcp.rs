@@ -19,7 +19,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vmm_core::error::VmmError;
 use vmm_core::schema::{
-    ApplyReport, Change, ErrorCodeList, ErrorReport, GameList, ModDetail, ModList, OrderReport, Plan, StatusReport,
+    ApplyReport, Change, Diagnosis, ErrorCodeList, ErrorReport, GameList, LastDeploy, LogList, ModDetail, ModList,
+    OrderReport, Plan, SCHEMA_VERSION, StatusReport,
 };
 use vmm_engine::Engine;
 use vmm_engine::journal::Caller;
@@ -29,7 +30,8 @@ pub const INSTRUCTIONS: &str = "\
 Vaexil Mod Manager manages mods for HITMAN World of Assassination through Simple Mod Framework (SMF).
 
 Rules:
-- You may read anything at any time: get_status, list_mods, get_mod, get_load_order, list_games, list_error_codes.
+- You may read anything at any time: get_status, list_mods, get_mod, get_load_order, list_games, \
+list_error_codes, get_logs, get_deploy_report, diagnose. For \"what went wrong\", start with diagnose.
 - Change nothing on your own initiative. Plan or apply a change only when the user has asked for that \
 change in so many words, such as \"turn off every mod\" or \"enable these three\".
 - To change something: call plan_change, show the user the plan's steps, then call apply_plan with the \
@@ -53,6 +55,13 @@ pub struct ModArgs {
     pub mod_id: String,
     #[serde(default)]
     pub game: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct LogArgs {
+    /// How many of the newest events to return (default 50).
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -88,7 +97,11 @@ fn result<T: Serialize>(r: Result<T, VmmError>) -> Result<CallToolResult, McpErr
 }
 
 fn engine_for(game: &Option<String>) -> (Engine, Option<std::path::PathBuf>) {
-    (Engine::open(), game.as_ref().map(std::path::PathBuf::from))
+    engine_as(game, Caller::Mcp { client: "unknown".into() })
+}
+
+fn engine_as(game: &Option<String>, caller: Caller) -> (Engine, Option<std::path::PathBuf>) {
+    (Engine::open_as(caller), game.as_ref().map(std::path::PathBuf::from))
 }
 
 fn client_name(peer: &Peer<RoleServer>) -> String {
@@ -179,13 +192,56 @@ impl Vmm {
     }
 
     #[tool(
+        description = "The newest events, newest last: every change (with who made it: gui, cli or mcp:<app>) \
+                       and every failure, with its error code.",
+        output_schema = schema_for_output::<LogList>(),
+        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn get_logs(&self, Parameters(a): Parameters<LogArgs>) -> Result<CallToolResult, McpError> {
+        let events = engine_for(&None).0.recent_events(a.limit.unwrap_or(50));
+        result(Ok::<_, VmmError>(LogList { schema_version: SCHEMA_VERSION, events }))
+    }
+
+    #[tool(
+        description = "The last deploy, read from SMF's output: whether it succeeded, how long it took, its \
+                       stages, its warnings grouped by kind and mod (each counted once), and its errors.",
+        output_schema = schema_for_output::<LastDeploy>(),
+        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn get_deploy_report(&self) -> Result<CallToolResult, McpError> {
+        let report = engine_for(&None).0.deploy_report();
+        result(Ok::<_, VmmError>(LastDeploy { schema_version: SCHEMA_VERSION, report }))
+    }
+
+    #[tool(
+        description = "Everything at once for working out a problem: how the game was found, the status, every \
+                       current problem (unreadable mods, broken load rules), the last deploy, the newest 200 \
+                       events, settings and any crash records. Paths under the user's profile start with ~.",
+        output_schema = schema_for_output::<Diagnosis>(),
+        annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn diagnose(&self, Parameters(a): Parameters<GameArgs>) -> Result<CallToolResult, McpError> {
+        let (e, folder) = engine_for(&a.game);
+        let game = match e.pick_game(folder.as_deref()) {
+            Ok(g) => Some(g),
+            Err(err) if folder.is_some() => return result::<Diagnosis>(Err(err)),
+            Err(_) => None,
+        };
+        result(Ok::<_, VmmError>(e.diagnose(game.as_ref())))
+    }
+
+    #[tool(
         description = "Checks changes the user asked for and returns a plan: its steps in plain words and a \
                        planId. Changes nothing in the game. Show the user the steps before applying.",
         output_schema = schema_for_output::<Plan>(),
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
-    async fn plan_change(&self, Parameters(a): Parameters<PlanArgs>) -> Result<CallToolResult, McpError> {
-        let (e, folder) = engine_for(&a.game);
+    async fn plan_change(
+        &self,
+        Parameters(a): Parameters<PlanArgs>,
+        peer: Peer<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let (e, folder) = engine_as(&a.game, Caller::Mcp { client: client_name(&peer) });
         result(e.pick_game(folder.as_deref()).and_then(|g| e.plan(&g, a.changes)))
     }
 
@@ -202,7 +258,7 @@ impl Vmm {
         peer: Peer<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let caller = Caller::Mcp { client: client_name(&peer) };
-        let (e, folder) = engine_for(&a.game);
+        let (e, folder) = engine_as(&a.game, caller.clone());
         result(e.pick_game(folder.as_deref()).and_then(|g| e.apply_plan(&g, &a.plan_id, &caller, Some(&a.request))))
     }
 }

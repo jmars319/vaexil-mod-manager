@@ -7,6 +7,7 @@
 //! `vmm-engine`; this module only turns the engine's answers into the window.
 
 mod order_view;
+mod report;
 mod settings;
 mod sheet;
 mod view;
@@ -69,6 +70,7 @@ pub fn run() -> i32 {
     wire::wire_setups(&ui, &state);
     wire::wire_pass(&ui, &state);
     settings::wire_settings(&ui, &state);
+    report::wire_report(&ui, &state);
     refresh(&ui, &state);
 
     {

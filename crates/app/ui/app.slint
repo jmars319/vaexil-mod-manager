@@ -9,8 +9,9 @@ import { EditSheet, EditState, OptCheck, OptSelect } from "sheet.slint";
 import { OrderList, OrderRowData, OrderState } from "order.slint";
 import { PassBatch, PassCandidate, PassState, PassView, SetupsSheet, SetupsState } from "setups.slint";
 import { SettingsSheet, SettingsState } from "settings.slint";
+import { ReportSheet, ReportState, ReportWarning } from "report.slint";
 
-export { Message, EditState, OptCheck, OptSelect, OrderRowData, OrderState, PassBatch, PassCandidate, PassState, SetupsState, SettingsState }
+export { Message, EditState, OptCheck, OptSelect, OrderRowData, OrderState, PassBatch, PassCandidate, PassState, SetupsState, SettingsState, ReportState, ReportWarning }
 
 export struct ModRow {
     // Set on a group heading row; the other fields are then empty.
@@ -66,6 +67,7 @@ export global Ui {
     callback deploy();
     callback play();
     callback open-log();
+    callback show-report();
     callback show-setups();
     callback show-settings();
     callback show-pass(show: bool);
@@ -141,6 +143,11 @@ component DeployBar inherits Rectangle {
             horizontal-stretch: 1;
             wrap: word-wrap;
             accessible-label: "Deploy status: " + Ui.deploy-status;
+        }
+        if Ui.has-log: Button {
+            text: "Report";
+            accessible-label: "Show the last deploy report";
+            clicked => { Ui.show-report(); }
         }
         if Ui.has-log: Button {
             text: "Open log";
@@ -554,6 +561,7 @@ export component AppWindow inherits Window {
     if Ui.sheet == "edit": EditSheet { init => { self.focus(); } }
     if Ui.sheet == "setups": SetupsSheet { init => { self.focus(); } }
     if Ui.sheet == "settings": SettingsSheet { init => { self.focus(); } }
+    if Ui.sheet == "report": ReportSheet { init => { self.focus(); } }
 }
 
 /// A plain message for errors before the main window exists.

@@ -20,13 +20,14 @@ Early development, nothing released yet. It can now:
 - **Change a mod's options and type** in its edit sheet. Options are saved to SMF's `config.json` as SMF's own Mod Manager saves them, after keeping a copy. The type only regroups the Mods view and is kept in the app's own `settings.json`.
 - **Keep setups:** save the mods that are on, in their order and with their options, and switch between saved setups.
 - **Run a compatibility pass** after a game update: start with every mod off or from the mods on now, try small batches, and mark each good (it joins the baseline) or bad (the game goes back to the baseline). Saves are never touched.
-- **Deploy and Play:** run SMF's own `Deploy.exe` unchanged, with its output in a log, and start HITMAN through Steam. Deploy and Play refuse while the game is running.
+- **Deploy and Play:** run SMF's own `Deploy.exe` unchanged, with its output in a log, and start HITMAN through Steam. Deploy and Play refuse while the game is running. **Report** reads that log into stages, warnings grouped by mod (each counted once) and errors.
+- **Logs and diagnostics:** every change and failure goes to an event log with who made it (the window, `vmm`, or an AI app), and Settings' **Copy diagnostics** copies everything needed to look into a problem.
 
 Keeping SMF current and Steam's own Play button come in later stages on the plan page.
 
 ## Command line
 
-`vmm.exe` ships beside the app and runs the same engine as the window, so a terminal or an AI tool can use Vaexil Mod Manager without screen control. Reading never changes anything: `vmm status`, `vmm mods`, `vmm mod <id>`, `vmm order`. A change is planned first and then applied by its plan id, which refuses if anything changed in between:
+`vmm.exe` ships beside the app and runs the same engine as the window, so a terminal or an AI tool can use Vaexil Mod Manager without screen control. Reading never changes anything: `vmm status`, `vmm mods`, `vmm mod <id>`, `vmm order`, `vmm logs`, `vmm deploy-report`, `vmm diagnose`. A change is planned first and then applied by its plan id, which refuses if anything changed in between:
 
 ```
 vmm plan enable Some.Mod.Id

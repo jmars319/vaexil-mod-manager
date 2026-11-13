@@ -402,6 +402,144 @@ impl ErrorCodeList {
     }
 }
 
+/// How serious a logged event is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// One line of the app's event log (`logs\vmm-<date>.jsonl`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEvent {
+    /// Milliseconds since 1970 (UTC).
+    pub ts_ms: u64,
+    pub level: LogLevel,
+    /// What happened, such as `mod.enabled`, `plan.applied` or `deploy.finished`.
+    pub event: String,
+    /// Who made it happen: `gui`, `cli` or `mcp:<AI app name>`.
+    pub caller: String,
+    pub game: Option<String>,
+    pub backend: Option<String>,
+    #[serde(rename = "mod")]
+    pub mod_id: Option<String>,
+    /// The plan, when the event is part of one.
+    pub plan: Option<String>,
+    pub message: String,
+    /// Set when the event is a failure.
+    pub error: Option<ErrorBody>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LogList {
+    pub schema_version: u32,
+    /// Newest last.
+    pub events: Vec<LogEvent>,
+}
+
+/// How a deploy ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeployResult {
+    Succeeded,
+    Failed,
+    /// The deploy tool could not be started, or ended without saying.
+    DidNotRun,
+}
+
+/// A stage the deploy tool reported, in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeployStage {
+    pub name: String,
+    /// The mod the stage was for, when it was for one.
+    #[serde(rename = "mod")]
+    pub mod_id: Option<String>,
+}
+
+/// Warnings of one kind about one mod, counted once each.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeployWarning {
+    /// A stable code such as `smf.raw_entity_file`, or `smf.warning` for one
+    /// this version doesn't recognise.
+    pub code: String,
+    /// The mod's name as the deploy tool gave it, when it named one.
+    #[serde(rename = "mod")]
+    pub mod_name: Option<String>,
+    /// How many distinct warnings of this kind.
+    pub count: usize,
+    /// What it means, in plain words.
+    pub detail: String,
+    /// Up to five of the warnings as the tool wrote them.
+    pub examples: Vec<String>,
+}
+
+/// The last deploy, read from the deploy tool's own output. A line the
+/// parser doesn't recognise stays only in the raw log and never fails it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeployReport {
+    pub schema_version: u32,
+    pub result: DeployResult,
+    pub exit_code: Option<i32>,
+    pub started_at_ms: Option<u64>,
+    pub finished_at_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub stages: Vec<DeployStage>,
+    pub warnings: Vec<DeployWarning>,
+    /// Lines the tool marked as errors, and Vaexil Mod Manager's own reason
+    /// when the tool could not run.
+    pub errors: Vec<String>,
+    /// The full log.
+    pub log: Option<String>,
+    pub log_lines: usize,
+}
+
+/// `vmm deploy-report`: the last deploy, or none yet.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LastDeploy {
+    pub schema_version: u32,
+    pub report: Option<DeployReport>,
+}
+
+/// A problem worth knowing, from anywhere in the app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Problem {
+    /// A stable code, such as `mod.unreadable` or `order.rule_broken`.
+    pub code: String,
+    #[serde(rename = "mod")]
+    pub mod_id: Option<String>,
+    pub detail: String,
+}
+
+/// Everything needed to understand a problem, in one object. Paths under
+/// the user's profile start with `~`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagnosis {
+    pub schema_version: u32,
+    pub app_version: String,
+    pub generated_at_ms: u64,
+    /// Where the game was looked for and what was found.
+    pub detection: Vec<String>,
+    pub status: StatusReport,
+    pub problems: Vec<Problem>,
+    pub last_deploy: Option<DeployReport>,
+    /// The newest 200 events, newest last.
+    pub recent_events: Vec<LogEvent>,
+    /// The app's settings that change behaviour.
+    pub settings: serde_json::Value,
+    /// Crash records the app has written, newest first, at most five.
+    pub crashes: Vec<String>,
+}
+
 /// Every type above that a command prints, by the file name `vmm schema`
 /// writes it to.
 pub fn all() -> Vec<(&'static str, schemars::Schema)> {
@@ -416,6 +554,9 @@ pub fn all() -> Vec<(&'static str, schemars::Schema)> {
         ("apply-report", schemars::schema_for!(ApplyReport)),
         ("error-report", schemars::schema_for!(ErrorReport)),
         ("error-code-list", schemars::schema_for!(ErrorCodeList)),
+        ("log-list", schemars::schema_for!(LogList)),
+        ("last-deploy", schemars::schema_for!(LastDeploy)),
+        ("diagnosis", schemars::schema_for!(Diagnosis)),
     ]
 }
 

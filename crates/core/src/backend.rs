@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::error::VmmError;
 use crate::game::GameInstall;
-use crate::schema::{Capabilities, NativeMods};
+use crate::schema::{Capabilities, DeployStage, DeployWarning, NativeMods};
 
 pub trait Backend {
     /// A stable id for tools and saved files, such as `smf`.
@@ -95,6 +95,20 @@ pub trait Backend {
 
     /// Runs the framework's own deploy, passing each output line to `on_line`.
     fn deploy(&self, game: &GameInstall, on_line: &mut dyn FnMut(&str)) -> Result<DeployOutcome, VmmError>;
+
+    /// Reads a deploy's log, as `deploy` passed it line by line, into stages,
+    /// warnings and errors. A line it doesn't recognise is skipped.
+    fn read_deploy_log(&self, text: &str) -> DeployLog;
+}
+
+/// What a backend read from its deploy tool's output.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeployLog {
+    pub stages: Vec<DeployStage>,
+    pub warnings: Vec<DeployWarning>,
+    pub errors: Vec<String>,
+    /// Whether the tool said it finished.
+    pub done: bool,
 }
 
 /// A saved state: which mods are on, in what order, with what options.
