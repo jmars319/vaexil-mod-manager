@@ -586,10 +586,20 @@ impl Engine {
                 }
                 Err(e) if i == 0 => return Err(e),
                 Err(e) => {
+                    // The steps before stay applied: record them, and who
+                    // asked, with the failure.
+                    let journal = self
+                        .data_dir()
+                        .map(|dir| journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps, Some(&e)));
+                    let unrecorded = match journal {
+                        Some(Err(j)) => format!(" They couldn't be added to the journal: {j}"),
+                        _ => String::new(),
+                    };
                     return Err(VmmError::new(
                         e.code,
                         format!(
-                            "{} The first {i} step(s) of the plan were applied, each after a backup; the rest were not.",
+                            "{} The first {i} step(s) of the plan were applied, each after a backup; the rest were \
+                             not.{unrecorded}",
                             e.message
                         ),
                     ));
@@ -598,7 +608,7 @@ impl Engine {
         }
         needs_deploy &= self.backend().capabilities().needs_deploy;
         let journal_problem = self.data_dir().and_then(|dir| {
-            journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps)
+            journal::append(dir, caller, &plan.game, &plan.plan_id, request, &steps, None)
                 .err()
                 .map(|e| format!("The change was made, but it couldn't be added to the journal: {e}"))
         });
@@ -965,6 +975,32 @@ mod tests {
             out.push(c.as_os_str());
         }
         out
+    }
+
+    #[test]
+    fn the_journal_keeps_a_failure_beside_the_steps_applied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let step = PlanStep { description: "Turn B on".into(), changes_something: true };
+        let e = VmmError::new(ErrorCode::SaveFailed, "disk full");
+        journal::append(tmp.path(), &Caller::Cli, "g", "0123456789abcdef", None, std::slice::from_ref(&step), None)
+            .unwrap();
+        journal::append(
+            tmp.path(),
+            &Caller::Mcp { client: "x".into() },
+            "g",
+            "0123456789abcdef",
+            Some("why"),
+            &[step],
+            Some(&e),
+        )
+        .unwrap();
+        let entries = journal::read(tmp.path());
+        assert!(entries[0].get("failed").is_none());
+        assert_eq!(entries[1]["failed"]["code"], "save.failed");
+        assert_eq!(
+            (entries[1]["steps"][0]["description"].as_str(), entries[1]["request"].as_str()),
+            (Some("Turn B on"), Some("why"))
+        );
     }
 
     #[test]

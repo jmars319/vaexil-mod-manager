@@ -9,7 +9,8 @@ use std::io::Write;
 use std::path::Path;
 
 use serde::Serialize;
-use vmm_core::schema::PlanStep;
+use vmm_core::error::VmmError;
+use vmm_core::schema::{ErrorBody, ErrorReport, PlanStep};
 
 use crate::deploy;
 
@@ -48,10 +49,15 @@ struct Entry<'a> {
     game: &'a str,
     plan_id: &'a str,
     request: Option<&'a str>,
+    /// The steps that were applied, in order.
     steps: &'a [PlanStep],
+    /// Set when a later step failed: its error. The steps above stay applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failed: Option<ErrorBody>,
 }
 
-/// Appends one applied plan to the journal.
+/// Appends one applied plan to the journal: the steps applied and, when a
+/// later step failed, its error.
 pub fn append(
     dir: &Path,
     caller: &Caller,
@@ -59,8 +65,10 @@ pub fn append(
     plan_id: &str,
     request: Option<&str>,
     steps: &[PlanStep],
+    failed: Option<&VmmError>,
 ) -> std::io::Result<()> {
-    let entry = Entry { ts_ms: deploy::now_ms(), caller: caller.label(), game, plan_id, request, steps };
+    let failed = failed.map(|e| ErrorReport::from(e).error);
+    let entry = Entry { ts_ms: deploy::now_ms(), caller: caller.label(), game, plan_id, request, steps, failed };
     let mut line = serde_json::to_string(&entry).expect("a journal entry serializes");
     line.push('\n');
     std::fs::create_dir_all(dir)?;
