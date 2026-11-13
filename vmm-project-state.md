@@ -25,7 +25,8 @@ The working state around the plan page and the docs. The plan page holds the roa
 
 ## Active Task State & Known Regressions
 
-- `main` is at #11 (SMF 2.33.45 recognised). #12 is rebased onto it and waiting on CI. The owner approved merging it once green; this repo does not allow GitHub auto-merge.
+- `main` is at #11 (SMF 2.33.45 recognised). #12 is rebased onto it. Its three Codex review findings (no backup without an app data folder, concurrent writers, a broken enabled mod that couldn't be turned off) were fixed in f84709f, answered and resolved. The owner approved merging #12, then this file (#13), once CI is green.
+- Merging needs every review thread resolved (branch protection: conversation resolution and linear history). GitHub auto-merge is off for this repo. Codex reviews each push.
 - Installed on JASON-PC: 0.1.0 (read-only, from before stage 02). Rebuild and reinstall after #12 merges.
 - HITMAN folder (2026-11-12): official SMF 2.33.45 applied the way SMF's updater does, Vortex leftovers removed, the owner's 10-mod `config.json` restored. Test deploy took 30m32s with 0 errors. The pre-reinstall backup is in `Downloads\hitman-smf-backup-2026-11-12` until the owner has checked the game.
 - Known gaps:
@@ -37,7 +38,8 @@ The working state around the plan page and the docs. The plan page holds the roa
 
 - `config.json` is JSON5 as SMF writes it (single quotes). The app reads JSON5 and writes plain JSON with key order kept (serde_json `preserve_order`), touching only `loadOrder`, plus `modOptions` the first time a mod with options is turned on.
 - First-time on must fill the author's `enabledByDefault` checkbox and select options: `Deploy.exe` applies no options for a mod without a `modOptions` entry.
-- Each write: copy the old file to `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups` (newest 20; a failed copy stops the write), write `config.json.vmm-new`, rename over. Any new write updates `docs/safety-model.md` in the same PR.
+- Each write: copy the old file to `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups` (newest 20; a failed copy, or no `%LOCALAPPDATA%`, stops the write). Then write `config.json.vmm-<pid>.tmp`, read `config.json` again and refuse if it changed since it was read, and rename over. Any new write updates `docs/safety-model.md` in the same PR.
+- A load-order id that no mod folder answers to gets its own row (kind Other, with a problem line), so it can be turned off.
 - Slint: assigning a Switch's `checked` ends its binding, so the row re-syncs it on `changed item`. ScrollView already scrolls a focused control into view; don't add scroll code. UI Automation sees only on-screen rows, so smoke tests reach lower rows with Tab.
 - Dev and test runs set `VAEXIL_MOD_MANAGER_GAME` (fake game folder) and `VAEXIL_MOD_MANAGER_DATA` (instead of `%LOCALAPPDATA%`). Never click switches against the real install while testing.
 - SMF refreshes `cleanPackageDefinition.txt` itself but never `cleanThumbs.dat`. Stage 04 must replace a stale one after a game update.
