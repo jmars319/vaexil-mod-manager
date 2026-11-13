@@ -15,6 +15,7 @@ export struct OptSelect {
     group: string,
     labels: [string],
     index: int,
+    enabled: bool,
 }
 
 export global EditState {
@@ -98,6 +99,7 @@ export component EditSheet inherits Sheet {
                     ComboBox {
                         model: s.labels;
                         current-index: s.index;
+                        enabled: s.enabled;
                         accessible-label: s.group;
                         selected => { EditState.select(i, self.current-index); }
                     }

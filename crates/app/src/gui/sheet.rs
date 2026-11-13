@@ -33,11 +33,25 @@ pub struct Select {
     pub group: String,
     pub labels: Vec<String>,
     pub values: Vec<String>,
+    /// Whether each option's required mods are on.
+    pub usable: Vec<bool>,
     pub index: usize,
 }
 
+impl Select {
+    /// False when every option needs a mod that is off: the group can't be
+    /// used, so it is shown but not changeable, and not saved.
+    pub fn enabled(&self) -> bool {
+        self.usable.iter().any(|u| *u)
+    }
+}
+
 fn needs_note(needs: &[String]) -> String {
-    if needs.is_empty() { String::new() } else { format!("Needs {} turned on first.", needs.join(", ")) }
+    if needs.is_empty() {
+        String::new()
+    } else {
+        format!("Needs {} turned on first. SMF leaves it out until then.", needs.join(", "))
+    }
 }
 
 impl EditSheet {
@@ -61,8 +75,7 @@ impl EditSheet {
                         .collect::<Vec<_>>()
                         .join(" "),
                     checked: o.chosen,
-                    // A chosen option stays changeable, so it can be turned off.
-                    enabled: o.needs.is_empty() || o.chosen,
+                    enabled: o.needs.is_empty(),
                 }),
                 Some(group) => {
                     let label = if o.needs.is_empty() {
@@ -77,11 +90,13 @@ impl EditSheet {
                             }
                             s.labels.push(label);
                             s.values.push(o.value.clone());
+                            s.usable.push(o.needs.is_empty());
                         }
                         None => selects.push(Select {
                             group: group.clone(),
                             labels: vec![label],
                             values: vec![o.value.clone()],
+                            usable: vec![o.needs.is_empty()],
                             index: 0,
                         }),
                     }
@@ -110,10 +125,16 @@ impl EditSheet {
         sheet
     }
 
-    /// The chosen options, as the framework stores them.
+    /// The chosen options, as the framework stores them. An option whose
+    /// required mods are off never counts: SMF would leave it out anyway, and
+    /// counting it would make the whole save fail.
     pub fn chosen(&self) -> Vec<String> {
-        let checks = self.checks.iter().filter(|c| c.checked).map(|c| c.value.clone());
-        let selects = self.selects.iter().filter_map(|s| s.values.get(s.index).cloned());
+        let checks = self.checks.iter().filter(|c| c.checked && c.enabled).map(|c| c.value.clone());
+        let selects = self
+            .selects
+            .iter()
+            .filter(|s| s.usable.get(s.index).copied().unwrap_or(false))
+            .filter_map(|s| s.values.get(s.index).cloned());
         checks.chain(selects).collect()
     }
 
@@ -206,6 +227,22 @@ mod tests {
         s.kind_index = 1 + ModKind::ALL.iter().position(|k| *k == ModKind::Sound).unwrap();
         assert_eq!(s.kind(), Some(ModKind::Sound));
         assert!(s.kind_changed());
+    }
+
+    #[test]
+    fn options_whose_mods_are_off_never_block_a_save() {
+        let m = entry(vec![
+            opt("Darker", None, false, &[]),
+            opt("With A", None, true, &["Mod.A"]),
+            opt("Mood:Calm", Some("Mood"), false, &["Mod.A"]),
+            opt("Mood:Angry", Some("Mood"), false, &["Mod.A"]),
+        ]);
+        let mut s = EditSheet::new(&m, ModKind::Gameplay, None);
+        assert!(!s.checks[1].enabled);
+        assert!(!s.selects[0].enabled());
+        assert!(s.chosen().is_empty());
+        s.checks[0].checked = true;
+        assert_eq!(s.chosen(), ["Darker"]);
     }
 
     #[test]

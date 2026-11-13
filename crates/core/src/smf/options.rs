@@ -87,8 +87,9 @@ pub fn describe(options: &[Value], stored: Option<&[String]>, load_order: &[Stri
 }
 
 /// Checks a choice against the manifest and puts it in manifest order, ready
-/// to store. Every select group gets exactly one choice: the one picked, or
-/// failing that its default, or failing that its first option.
+/// to store. Every select group gets one choice: the one picked, or failing
+/// that its default, or failing that its first option, counting only options
+/// whose required mods are on. A group with none of those gets no choice.
 pub fn validate(options: &[Value], picked: &[String], load_order: &[String]) -> Result<Vec<String>, String> {
     let all = choices(options);
     for p in picked {
@@ -116,11 +117,12 @@ pub fn validate(options: &[Value], picked: &[String], load_order: &[String]) -> 
                 if chosen.len() > 1 {
                     return Err(format!("Only one choice can be picked for \"{g}\"."));
                 }
+                let usable: Vec<&&Choice> = in_group.iter().filter(|o| missing(o, load_order).is_empty()).collect();
                 let pick = chosen
                     .first()
                     .map(|o| **o)
-                    .or_else(|| in_group.iter().find(|o| o.enabled_by_default).copied())
-                    .or_else(|| in_group.first().copied());
+                    .or_else(|| usable.iter().find(|o| o.enabled_by_default).map(|o| **o))
+                    .or_else(|| usable.first().map(|o| **o));
                 if let Some(o) = pick {
                     out.push(o.value.clone());
                 }
@@ -184,6 +186,20 @@ mod tests {
         assert_eq!(validate(&opts(), &picked, &[]).unwrap(), ["Darker", "Brighter", "Hands:Bare hands"]);
         let picked = vec!["Hands:Gloves".to_string()];
         assert_eq!(validate(&opts(), &picked, &[]).unwrap(), ["Hands:Gloves"]);
+    }
+
+    #[test]
+    fn a_group_whose_options_all_need_mods_gets_no_choice() {
+        let opts = json!([
+            { "name": "Calm", "group": "Mood", "type": "select", "requirements": ["Mod.A"] },
+            { "name": "Angry", "group": "Mood", "type": "select", "enabledByDefault": true, "requirements": ["Mod.A"] },
+            { "name": "Loud", "group": "Volume", "type": "select", "requirements": ["Mod.A"] },
+            { "name": "Quiet", "group": "Volume", "type": "select" },
+            { "name": "Darker", "type": "checkbox" },
+        ]);
+        let opts = opts.as_array().unwrap();
+        assert_eq!(validate(opts, &["Darker".into()], &[]).unwrap(), ["Volume:Quiet", "Darker"]);
+        assert_eq!(validate(opts, &[], &["Mod.A".into()]).unwrap(), ["Mood:Angry", "Volume:Loud"]);
     }
 
     #[test]

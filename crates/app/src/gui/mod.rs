@@ -227,6 +227,7 @@ fn show_sheet(ui: &AppWindow, state: &State, s: &sheet::EditSheet, error: &str) 
                     sel.labels.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>(),
                 )),
                 index: sel.index as i32,
+                enabled: sel.enabled(),
             })
             .collect::<Vec<_>>(),
     );
@@ -247,7 +248,9 @@ fn save_sheet(state: &State, s: &sheet::EditSheet) -> Result<(), String> {
     }
     if s.kind_changed() {
         let dir = state.data_dir.clone().ok_or("There is no folder to keep the type in. The type was not changed.")?;
-        let mut settings = state.settings.borrow().clone()?;
+        // Read the file again rather than trusting what was read at start: a
+        // second window may have saved since, and its change must survive.
+        let mut settings = Settings::load(&dir)?;
         match s.kind() {
             Some(k) => settings.kind_overrides.insert(s.mod_id.clone(), k),
             None => settings.kind_overrides.remove(&s.mod_id),
@@ -264,6 +267,10 @@ fn refresh(ui: &AppWindow, state: &State) {
         None => vmm_core::game::find_installs(&crate::platform::sources()),
     };
     *state.game.borrow_mut() = installs.first().cloned();
+    // Reread the settings, so a type saved in another window shows here too.
+    if let Some(dir) = &state.data_dir {
+        *state.settings.borrow_mut() = Settings::load(dir);
+    }
     let kinds = state.settings.borrow().as_ref().map(|s| s.kind_overrides.clone()).unwrap_or_default();
     let v = view::build(&installs, state.smf.as_ref(), &kinds);
     let g = ui.global::<Ui>();
