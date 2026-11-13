@@ -160,6 +160,21 @@ impl Backend for Smf {
         write::set_load_order(&folder, order, self.backup_dir.as_deref())
     }
 
+    fn mods_with(
+        &self,
+        game: &GameInstall,
+        order: &[String],
+        options: &BTreeMap<String, Vec<String>>,
+    ) -> Result<Vec<ModEntry>, VmmError> {
+        let folder = smf_folder(game)?;
+        let mut config = read_config(&folder)?;
+        config.load_order = order.to_vec();
+        for (id, values) in options {
+            config.mod_options.insert(id.clone(), serde_json::json!(values));
+        }
+        Ok(list_mods(&folder.join("Mods"), &config, &self.kinds).0)
+    }
+
     fn current_setup(&self, game: &GameInstall) -> Result<Setup, VmmError> {
         let folder = smf_folder(game)?;
         let config = read_config(&folder)?;

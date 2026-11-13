@@ -292,6 +292,9 @@ impl Engine {
                 self.kind_overrides()
             },
         };
+        // Options an earlier step chose, which can bring load rules of their
+        // own; placing a mod after such a step reads the mods again with them.
+        let mut chosen_by_plan: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut steps = Vec::new();
         for change in changes {
             let step = match change {
@@ -311,7 +314,12 @@ impl Engine {
                     // rule changed after planning changes the step.
                     let mut place = None;
                     if *enabled && !on {
-                        let at = vmm_core::order::insert_position(&sim.order, mod_id, mods);
+                        let at = if chosen_by_plan.is_empty() {
+                            vmm_core::order::insert_position(&sim.order, mod_id, mods)
+                        } else {
+                            let now = self.backend().mods_with(game, &sim.order, &chosen_by_plan)?;
+                            vmm_core::order::insert_position(&sim.order, mod_id, &now)
+                        };
                         sim.order.insert(at, mod_id.clone());
                         place = Some((at + 1, sim.order.len()));
                         // Turning a mod on gives it its default options.
@@ -334,6 +342,7 @@ impl Engine {
                     let resolved = self.backend().resolve_options(game, mod_id, chosen, &sim.order).map_err(|e| {
                         VmmError::new(e.code, format!("{}: {} Nothing was changed.", mod_label(m), e.message))
                     })?;
+                    chosen_by_plan.insert(mod_id.clone(), resolved.clone());
                     let new: BTreeSet<String> = resolved.iter().cloned().collect();
                     let changed = sim.chosen.get(mod_id) != Some(&new);
                     sim.chosen.insert(mod_id.clone(), new);
@@ -770,6 +779,33 @@ mod tests {
         .unwrap();
         let err = engine.apply_plan(&game, &plan.plan_id).unwrap_err();
         assert_eq!(err.code, ErrorCode::ConfigChangedMeanwhile);
+    }
+
+    #[test]
+    fn an_option_chosen_earlier_in_a_plan_brings_its_load_rules() {
+        let (_tmp, game, engine) = setup();
+        // A (on) has an option that makes it load after B.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', options: [{ name: 'X', type: 'checkbox', loadAfter: ['B'] }] }",
+        )
+        .unwrap();
+        let plan = engine
+            .plan(
+                &game,
+                vec![
+                    Change::SetOptions { mod_id: "A".into(), chosen: vec!["X".into()] },
+                    Change::SetEnabled { mod_id: "B".into(), enabled: true },
+                ],
+            )
+            .unwrap();
+        assert!(
+            plan.steps[1].description.ends_with("at place 1 of 2 in the load order"),
+            "{}",
+            plan.steps[1].description
+        );
+        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        assert_eq!(engine.current_setup(&game).unwrap().order, ["B", "A"]);
     }
 
     #[test]

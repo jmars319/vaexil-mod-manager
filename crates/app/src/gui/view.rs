@@ -232,6 +232,14 @@ mod tests {
         ) -> Result<Vec<String>, vmm_core::error::VmmError> {
             unreachable!("the view never plans")
         }
+        fn mods_with(
+            &self,
+            _: &GameInstall,
+            _: &[String],
+            _: &std::collections::BTreeMap<String, Vec<String>>,
+        ) -> Result<Vec<vmm_core::backend::ModEntry>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
         fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }

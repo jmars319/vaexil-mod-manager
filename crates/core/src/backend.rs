@@ -51,6 +51,17 @@ pub trait Backend {
         load_order: &[String],
     ) -> Result<Vec<String>, VmmError>;
 
+    /// The mods as they would read with `order` as the load order and
+    /// `options` in place of those mods' stored options: their load rules
+    /// then include the rules of those options. Writes nothing; plans use it
+    /// to place a mod exactly where turning it on would.
+    fn mods_with(
+        &self,
+        game: &GameInstall,
+        order: &[String],
+        options: &BTreeMap<String, Vec<String>>,
+    ) -> Result<Vec<ModEntry>, VmmError>;
+
     /// Saves a new load order. It must hold exactly the mods that are on now,
     /// first to last; anything else is refused. Returns `false` when the order
     /// was already this.
