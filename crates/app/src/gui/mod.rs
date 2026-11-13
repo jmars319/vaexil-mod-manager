@@ -1,13 +1,17 @@
-//! The main window. Stage 1 is read-only: it finds HITMAN and its SMF and
-//! shows the mods, refreshing every few seconds.
+//! The main window. It finds HITMAN and its SMF, shows the mods grouped by
+//! kind, refreshes every few seconds, and turns mods on or off in SMF's
+//! `config.json` when a switch is used.
 
 mod view;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use vmm_core::framework::Framework;
+use vmm_core::game::GameInstall;
 use vmm_core::smf::Smf;
 
 use crate::{AppWindow, Message, ModRow, Ui};
@@ -27,16 +31,36 @@ pub fn run() -> i32 {
     g.set_mods(ModelRc::from(rows.clone()));
     g.set_notes(ModelRc::from(notes.clone()));
 
-    let smf = Rc::new(Smf::default());
-    refresh(&ui, &smf, &rows, &notes);
+    let smf = Rc::new(match crate::platform::data_dir() {
+        Some(dir) => Smf::with_backups(dir.join("config-backups")),
+        None => Smf::default(),
+    });
+    let state = Rc::new(State { smf, rows, notes, game: RefCell::default(), error: RefCell::default() });
+    refresh(&ui, &state);
+
+    {
+        let weak = ui.as_weak();
+        let state = state.clone();
+        g.on_toggle(move |id, on| {
+            let Some(ui) = weak.upgrade() else { return };
+            let game = state.game.borrow().clone();
+            let result = match &game {
+                Some(game) => state.smf.set_enabled(game, &id, on),
+                None => Err("HITMAN is no longer where it was. Nothing was changed.".to_string()),
+            };
+            *state.error.borrow_mut() =
+                result.err().map(|e| format!("Couldn't turn that mod {}. {e}", if on { "on" } else { "off" }));
+            refresh(&ui, &state);
+        });
+    }
 
     let timer = slint::Timer::default();
     {
         let weak = ui.as_weak();
-        let (smf, rows, notes) = (smf.clone(), rows.clone(), notes.clone());
+        let state = state.clone();
         timer.start(slint::TimerMode::Repeated, Duration::from_secs(5), move || {
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &smf, &rows, &notes);
+                refresh(&ui, &state);
             }
         });
     }
@@ -50,12 +74,24 @@ pub fn run() -> i32 {
     }
 }
 
-fn refresh(ui: &AppWindow, smf: &Smf, rows: &VecModel<ModRow>, notes: &VecModel<Message>) {
+/// What the window's callbacks share.
+struct State {
+    smf: Rc<Smf>,
+    rows: Rc<VecModel<ModRow>>,
+    notes: Rc<VecModel<Message>>,
+    /// The install the list shows, which a switch acts on.
+    game: RefCell<Option<GameInstall>>,
+    /// The last change that failed, shown until the next one succeeds.
+    error: RefCell<Option<String>>,
+}
+
+fn refresh(ui: &AppWindow, state: &State) {
     let installs = match crate::platform::game_override() {
         Some(game) => vec![game],
         None => vmm_core::game::find_installs(&crate::platform::sources()),
     };
-    let v = view::build(&installs, smf);
+    *state.game.borrow_mut() = installs.first().cloned();
+    let v = view::build(&installs, state.smf.as_ref());
     let g = ui.global::<Ui>();
     g.set_screen(match v.screen {
         view::Screen::Mods => "mods".into(),
@@ -72,15 +108,21 @@ fn refresh(ui: &AppWindow, smf: &Smf, rows: &VecModel<ModRow>, notes: &VecModel<
         .rows
         .into_iter()
         .map(|r| ModRow {
+            heading: r.heading.into(),
+            id: r.id.into(),
             name: r.name.into(),
             detail: r.detail.into(),
             position: r.position,
             badge: r.badge.into(),
             problem: r.problem.into(),
+            can_toggle: r.can_toggle,
         })
         .collect();
-    sync(rows, fresh);
-    sync(notes, v.notes.into_iter().map(|n| Message { text: SharedString::from(n), error: false }).collect());
+    sync(&state.rows, fresh);
+    let error = state.error.borrow().clone().map(|text| Message { text: text.into(), error: true });
+    let notes =
+        error.into_iter().chain(v.notes.into_iter().map(|n| Message { text: SharedString::from(n), error: false }));
+    sync(&state.notes, notes.collect());
 }
 
 fn sync<T: Clone + PartialEq + 'static>(model: &VecModel<T>, fresh: Vec<T>) {

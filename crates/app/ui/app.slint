@@ -4,17 +4,22 @@ import "../../../assets/fonts/Geist-SemiBold.ttf";
 import "../../../assets/fonts/Geist-Bold.ttf";
 import "../../../assets/fonts/GeistMono-Regular.ttf";
 import { ScrollView } from "std-widgets.slint";
-import { Button, Theme, Message, Messages } from "theme.slint";
+import { Button, Switch, Theme, Message, Messages } from "theme.slint";
 
 export { Message }
 
 export struct ModRow {
+    // Set on a group heading row; the other fields are then empty.
+    heading: string,
+    // The id SMF's load order uses.
+    id: string,
     name: string,
     detail: string,
     // 1-based load position, or 0 when the mod is off.
     position: int,
     badge: string,
     problem: string,
+    can-toggle: bool,
 }
 
 export global Ui {
@@ -29,6 +34,7 @@ export global Ui {
     in property <string> summary;
     in property <[ModRow]> mods;
     in property <[Message]> notes;
+    callback toggle(id: string, on: bool);
 }
 
 component Chip inherits Rectangle {
@@ -51,15 +57,37 @@ component Chip inherits Rectangle {
     }
 }
 
+/// A group heading such as "Sound", with how many mods it holds.
+component GroupHeading inherits Rectangle {
+    in property <string> text;
+    min-height: label.preferred-height + 18px;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+    label := Text {
+        y: parent.height - self.height - 4px;
+        x: 2px;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 600;
+        color: Theme.secondary-text;
+        accessible-role: none;
+    }
+}
+
 component ModRowView inherits Rectangle {
     in property <ModRow> item;
+    // A click moves the switch before the file changes, and setting
+    // `checked` ends its binding, so it follows the row by hand from then on:
+    // after every refresh, and right after a click (the write and refresh
+    // run inside Ui.toggle, so a failed write puts it back).
+    changed item => { switch.checked = root.item.position > 0; }
     min-height: content.preferred-height;
     border-radius: 12px;
     background: Theme.surface;
     border-width: 1px;
     border-color: Theme.surface-border;
     accessible-role: list-item;
-    accessible-label: root.item.name + ", " + (root.item.position > 0 ? "load position " + root.item.position : "off")
+    accessible-label: root.item.name + ", " + (root.item.position > 0 ? "on, load position " + root.item.position : "off")
         + (root.item.detail != "" ? ", " + root.item.detail : "")
         + (root.item.problem != "" ? ". Problem: " + root.item.problem : "");
 
@@ -71,22 +99,14 @@ component ModRowView inherits Rectangle {
         spacing: 14px;
         VerticalLayout {
             alignment: center;
-            Rectangle {
-                width: 40px;
-                height: 24px;
-                border-radius: 12px;
-                background: root.item.position > 0 ? Theme.accent.transparentize(84%) : transparent;
-                border-width: root.item.position > 0 ? 0px : 1px;
-                border-color: Theme.surface-border;
-                Text {
-                    text: root.item.position > 0 ? root.item.position : "Off";
-                    font-size: 12px;
-                    font-weight: 600;
-                    font-family: root.item.position > 0 ? Theme.font-mono : Theme.font-sans;
-                    color: root.item.position > 0 ? Theme.accent : Theme.secondary-text;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    accessible-role: none;
+            switch := Switch {
+                text: "";
+                checked: root.item.position > 0;
+                enabled: root.item.can-toggle;
+                accessible-label: root.item.name;
+                toggled => {
+                    Ui.toggle(root.item.id, self.checked);
+                    self.checked = root.item.position > 0;
                 }
             }
         }
@@ -114,6 +134,16 @@ component ModRowView inherits Rectangle {
                 font-size: 12px;
                 color: Theme.danger;
                 wrap: word-wrap;
+                accessible-role: none;
+            }
+        }
+        if root.item.position > 0: VerticalLayout {
+            alignment: center;
+            Text {
+                text: "#" + root.item.position;
+                font-size: 12px;
+                font-family: Theme.font-mono;
+                color: Theme.accent;
                 accessible-role: none;
             }
         }
@@ -232,7 +262,19 @@ export component AppWindow inherits Window {
                     padding-right: gutter;
                     padding-bottom: gutter;
                     spacing: 8px;
-                    for m in Ui.mods: ModRowView { item: m; }
+                    for m in Ui.mods: Rectangle {
+                        min-height: m.heading != "" ? heading.min-height : mod.min-height;
+                        accessible-role: none;
+                        heading := GroupHeading {
+                            visible: m.heading != "";
+                            text: m.heading;
+                        }
+                        // ScrollView scrolls a focused switch into view itself.
+                        mod := ModRowView {
+                            visible: m.heading == "";
+                            item: m;
+                        }
+                    }
                 }
             }
         }
@@ -264,7 +306,7 @@ export component AppWindow inherits Window {
             padding-top: 8px;
             padding-bottom: 12px;
             Text {
-                text: "Read-only for now: Vaexil Mod Manager has not changed any file. Version " + Ui.version + ".";
+                text: "A switch changes SMF's config.json; the previous copy is kept first. The change reaches the game at the next deploy. Version " + Ui.version + ".";
                 font-size: 11px;
                 color: Theme.secondary-text;
                 wrap: word-wrap;

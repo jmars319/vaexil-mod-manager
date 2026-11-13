@@ -12,25 +12,34 @@ Vaexil Mod Manager's promise is that Simple Mod Framework stays exactly as its a
 | `X:\XboxGames\*\Content\MicrosoftGame.Config` (existence only) | Find a Microsoft Store install of HITMAN. |
 | The game's `Retail\HITMAN3.exe` or `Retail\Runtime\chunk0.rpkg` (existence only) | Confirm the folder is HITMAN, the same check SMF's own Mod Manager makes. |
 | SMF's `Deploy.exe` (read in full, never run) | Its SHA-256 identifies the installed SMF release. It is read again only when its size or modified time changes. |
-| SMF's `config.json` | The load order. Other keys are ignored. |
-| SMF's `Mods` folder (names only) and each mod's `manifest.json` | The mod list: name, id, version and authors. |
+| SMF's `Mods` folder and each mod's `manifest.json` | The mod list: name, id, version, authors and options. File names inside each mod (never their contents) show what kind of mod it is, for grouping the Mods view. |
 
 Enforcement:
 
-- Every file is opened with read-only calls (`std::fs::read`, `read_to_string`, `read_dir`, metadata). The core crate has no code that writes.
+- Every file above is opened with read-only calls (`std::fs::read`, `read_to_string`, `read_dir`, metadata).
 - A test snapshots a fake SMF install (every file's bytes and modified time, and every entry) before and after inspecting it twice, and fails on any change (`inspecting_never_modifies_the_install`).
 
 ## Written by the app
 
-Nothing, in this version. There is no settings file and no log yet. When a later stage adds one, it goes in `%LOCALAPPDATA%\Vaexil Mod Manager\` and this page says so first.
+| What | When | How |
+| --- | --- | --- |
+| SMF's `config.json` | A mod's switch is used in the Mods view. | Only `loadOrder` changes: on appends the mod's id, off removes it. A mod with options that has never had any chosen gets its author's defaults in `modOptions`, as SMF's own Mod Manager does. Every other key, and their order, is kept. The file is written as plain JSON, which SMF reads like the JSON5 it writes itself. |
+| `config.json.vmm-new` in SMF's folder | During that write, for a moment. | The new file is written here first, then renamed over `config.json` in one step, so SMF never reads half a file. It is removed if the rename fails. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups\config-<time>.json` | Before every change to `config.json`. | A copy of the file as it was. The newest 20 are kept. If the copy cannot be made, `config.json` is not changed. |
+
+Enforcement:
+
+- All writing is in one module, `crates/core/src/smf/write.rs`, behind `Framework::set_enabled`. Tests cover key order, other keys, JSON5 input, defaults, the backup, a failed backup stopping the write, and a file it cannot read being left alone.
+- The mouse-click smoke test runs the real window against a throwaway game folder and checks that a click changes only the load order and leaves a backup.
+- `VAEXIL_MOD_MANAGER_DATA` moves the app's folder for tests, so they never write to the user's profile.
 
 ## Processes
 
-- None are started. SMF's `Deploy.exe` is read for its hash and never run.
+- None are started. SMF's `Deploy.exe` is read for its hash and never run. A switch takes effect in the game at the next deploy, which is still done in SMF.
 
 ## Not done, by design
 
 - No network access. CI's dependency policy bans HTTP and TLS crates.
 - No telemetry or accounts.
-- No changes to anything inside HITMAN's folder or SMF's folder: not SMF's code, config, mods or deploy output.
+- No changes to anything else inside HITMAN's folder or SMF's folder: not SMF's code, mods or deploy output, and no `config.json` key besides `loadOrder` and a first-time `modOptions` entry.
 - Nothing is ever sent to SMF's authors or its repository.

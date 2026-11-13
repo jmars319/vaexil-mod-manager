@@ -12,6 +12,11 @@ pub trait Framework {
 
     /// Reads the framework's state for one game install. Never writes.
     fn inspect(&self, game: &GameInstall) -> Inspection;
+
+    /// Turns one mod on or off in the framework's own settings, the only
+    /// thing this trait writes. Returns `false` when the mod was already in
+    /// that state and nothing was written.
+    fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +60,44 @@ impl Version {
     }
 }
 
+/// What a mod mostly changes, for grouping the Mods view. Information only:
+/// it never affects what the framework loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ModKind {
+    Gameplay,
+    ModelsTextures,
+    Sound,
+    Dialogue,
+    Ui,
+    Text,
+    Other,
+}
+
+impl ModKind {
+    /// Every kind, in the order the Mods view shows its groups.
+    pub const ALL: [ModKind; 7] = [
+        ModKind::Gameplay,
+        ModKind::ModelsTextures,
+        ModKind::Sound,
+        ModKind::Dialogue,
+        ModKind::Ui,
+        ModKind::Text,
+        ModKind::Other,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ModKind::Gameplay => "Gameplay",
+            ModKind::ModelsTextures => "Models & Textures",
+            ModKind::Sound => "Sound",
+            ModKind::Dialogue => "Dialogue",
+            ModKind::Ui => "UI",
+            ModKind::Text => "Text",
+            ModKind::Other => "Other",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModEntry {
     pub id: String,
@@ -64,8 +107,10 @@ pub struct ModEntry {
     pub folder: PathBuf,
     /// A short framework-specific label, such as "RPKG".
     pub badge: Option<String>,
+    pub kind: ModKind,
     /// 1-based place in the load order; `None` when the mod is off.
     pub load_position: Option<usize>,
     /// Why the mod's own description could not be read, if it could not.
+    /// Such a mod cannot be turned on.
     pub problem: Option<String>,
 }

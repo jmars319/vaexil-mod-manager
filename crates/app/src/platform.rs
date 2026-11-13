@@ -13,6 +13,17 @@ pub fn game_override() -> Option<GameInstall> {
     Some(GameInstall { store: Store::Folder, root: PathBuf::from(dir) })
 }
 
+/// The app's own folder, `%LOCALAPPDATA%\Vaexil Mod Manager`.
+/// `VAEXIL_MOD_MANAGER_DATA` replaces it, so smoke tests stay out of the
+/// user's profile.
+pub fn data_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("VAEXIL_MOD_MANAGER_DATA").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    let base = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty())?;
+    Some(PathBuf::from(base).join("Vaexil Mod Manager"))
+}
+
 pub fn sources() -> Sources {
     Sources { steam: steam_root(), epic_manifests: epic_manifests(), xbox_roots: xbox_roots() }
 }
