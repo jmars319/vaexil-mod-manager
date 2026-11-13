@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "game": "<tmp>/game",
+  "changes": [
+    {
+      "op": "startPass",
+      "fromCurrent": false
+    }
+  ],
+  "steps": [
+    {
+      "description": "Start a compatibility pass from every mod off (turns off: A)",
+      "changesSomething": true
+    }
+  ],
+  "preconditions": [
+    {
+      "path": "<tmp>/game/Simple Mod Framework/config.json",
+      "sha256": "<sha256>"
+    },
+    {
+      "path": "<tmp>/data/setups.json",
+      "sha256": "<sha256>"
+    }
+  ],
+  "createdAtMs": "<createdAtMs>",
+  "expiresAtMs": "<expiresAtMs>"
+}

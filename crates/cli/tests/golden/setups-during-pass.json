@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "setups": [
+    {
+      "name": "Just A",
+      "order": [
+        "A"
+      ],
+      "options": {},
+      "inUse": false
+    }
+  ],
+  "pass": {
+    "baseline": [],
+    "batches": [
+      {
+        "name": "First",
+        "mods": [
+          "B",
+          "C"
+        ],
+        "state": "testing",
+        "notes": ""
+      }
+    ],
+    "candidates": [
+      "A",
+      "B",
+      "C"
+    ]
+  }
+}

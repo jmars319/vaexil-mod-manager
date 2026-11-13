@@ -52,7 +52,7 @@ Enforcement:
 
 ## Processes
 
-- **SMF's own `Deploy.exe`,** when you press Deploy, or Play with changes since the last deploy. It runs exactly as SMF's Mod Manager runs it: `Deploy.exe --doNotPause --colors` from SMF's folder, with no console window, unchanged. Its output goes to the deploy log above. Deploy and Play refuse while `HITMAN3.exe` or another `Deploy.exe` is running (read from the process list).
+- **SMF's own `Deploy.exe`,** when you press Deploy, or Play with changes since the last deploy, or run `vmm deploy --yes`, or an AI tool calls `start_deploy` (only with "Let AI tools make changes" on, and the user's request). It runs exactly as SMF's Mod Manager runs it: `Deploy.exe --doNotPause --colors` from SMF's folder, with no console window, unchanged. Its output goes to the deploy log above. Deploy and Play refuse while `HITMAN3.exe` or another `Deploy.exe` is running (read from the process list).
 - **Steam,** when you press Play on a Steam copy. The app opens `steam://rungameid/1659040`, as Steam's own Play button does. Copies from other stores are not started yet; the window says so.
 - **The log,** when you press Open log: Windows opens it with whatever it uses for text files.
 

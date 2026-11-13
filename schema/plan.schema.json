@@ -154,6 +154,145 @@
             "order"
           ],
           "description": "A new load order. It must hold exactly the mods that are on at that\npoint of the plan."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "autoSort"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "description": "The order that keeps every mod's load rules, moving as little as\npossible (as the window's Auto-sort)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "useSetup"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "name"
+          ],
+          "description": "Make a saved setup the game's mods: exactly its mods on, in its order,\nwith its options. Planned on its own."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "saveSetup"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "name"
+          ],
+          "description": "Save the mods that are on, in their order with their options, as a\nsetup (replacing one of the same name). Planned on its own."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "deleteSetup"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "name"
+          ],
+          "description": "Delete a saved setup. Planned on its own."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "startPass"
+            },
+            "fromCurrent": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "description": "Start a compatibility pass: from every mod off, or from the mods on\nnow as the baseline. Planned on its own."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "tryBatch"
+            },
+            "name": {
+              "type": "string",
+              "default": ""
+            },
+            "mods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "op",
+            "mods"
+          ],
+          "description": "Try a batch of mods on top of the pass's baseline. Planned on its own."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "markBatch"
+            },
+            "good": {
+              "type": "boolean"
+            },
+            "notes": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "required": [
+            "op",
+            "good"
+          ],
+          "description": "Mark the batch being tried: good joins the baseline, bad puts the game\nback to the baseline. Planned on its own."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "endPass"
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "description": "End the pass, keeping the mods as they are. Planned on its own."
         }
       ],
       "description": "One change to make. Every change is planned first and applied by its plan."

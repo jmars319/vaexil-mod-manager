@@ -19,6 +19,11 @@ use crate::store;
 
 const FILE: &str = "setups.json";
 
+/// Where the setups file is, in the data folder `dir`.
+pub fn path(dir: &Path) -> std::path::PathBuf {
+    dir.join(FILE)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedSetup {
     pub name: String,

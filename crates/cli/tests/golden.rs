@@ -137,6 +137,29 @@ fn a_change_is_planned_confirmed_and_applied_once() {
     f.check("plan-bad-kind", &["plan", "kind", "A", "loud"], 2);
 }
 
+/// Plans one change and applies it, returning the plan's id.
+fn plan_and_apply(f: &Fixture, name: &str, words: &[&str]) {
+    let mut args = vec!["plan"];
+    args.extend_from_slice(words);
+    let plan = f.check(&format!("plan-{name}"), &args, 0);
+    let id = plan["planId"].as_str().unwrap().to_string();
+    f.check(&format!("apply-{name}"), &["apply", &id, "--yes"], 0);
+}
+
+#[test]
+fn setups_and_a_compatibility_pass_from_the_command_line() {
+    let f = Fixture::new();
+    plan_and_apply(&f, "save-setup", &["save-setup", "Just", "A"]);
+    plan_and_apply(&f, "start-pass", &["start-pass"]);
+    plan_and_apply(&f, "try-batch", &["try-batch", "B", "C", "--name", "First"]);
+    f.check("setups-during-pass", &["setups"], 0);
+    plan_and_apply(&f, "mark-batch", &["mark-batch", "good", "works", "fine"]);
+    plan_and_apply(&f, "end-pass", &["end-pass"]);
+    plan_and_apply(&f, "use-setup", &["use-setup", "Just", "A"]);
+    f.check("order-after-use-setup", &["order"], 0);
+    f.check("deploy-without-yes", &["deploy"], 2);
+}
+
 #[test]
 fn a_plan_from_a_file_and_a_stale_plan() {
     let f = Fixture::new();

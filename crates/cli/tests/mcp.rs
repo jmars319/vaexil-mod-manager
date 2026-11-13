@@ -113,20 +113,23 @@ fn an_ai_client_can_read_everything_and_change_only_when_allowed() {
             "apply_plan",
             "diagnose",
             "get_deploy_report",
+            "get_deploy_status",
             "get_load_order",
             "get_logs",
             "get_mod",
+            "get_setups",
             "get_status",
             "list_error_codes",
             "list_games",
             "list_mods",
-            "plan_change"
+            "plan_change",
+            "start_deploy"
         ]
     );
     for t in &tools {
         assert!(t["outputSchema"].is_object(), "{} has no output schema", t["name"]);
         let a = &t["annotations"];
-        let writes = t["name"] == "apply_plan";
+        let writes = t["name"] == "apply_plan" || t["name"] == "start_deploy";
         assert_eq!(a["readOnlyHint"], json!(!writes), "{}", t["name"]);
         assert_eq!(a["destructiveHint"], json!(writes), "{}", t["name"]);
         assert_eq!(a["openWorldHint"], json!(false), "{}", t["name"]);
@@ -151,6 +154,11 @@ fn an_ai_client_can_read_everything_and_change_only_when_allowed() {
     let apply = json!({ "planId": plan_id, "request": "turn on B" });
     assert_eq!(error_code(&s.call("apply_plan", apply.clone())), "ai.changes_off");
     assert_eq!(std::fs::read(&config).unwrap(), before);
+
+    // A deploy is a change too: refused while Settings says no.
+    let deploy = s.call("start_deploy", json!({ "request": "deploy" }));
+    assert_eq!(error_code(&deploy), "ai.changes_off");
+    assert_eq!(s.call("get_setups", json!({}))["structuredContent"]["pass"], Value::Null);
 
     // Allowed in Settings (what the window's switch writes), it applies once
     // and the journal records the client and the request.

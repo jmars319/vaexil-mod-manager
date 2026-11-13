@@ -34,6 +34,8 @@ vmm plan enable Some.Mod.Id
 vmm apply <plan id> --yes
 ```
 
+Setups (`use-setup`, `save-setup`, `delete-setup`), auto-sort and the compatibility pass (`start-pass`, `try-batch`, `mark-batch`, `end-pass`) are planned the same way, and `vmm setups` shows them. `vmm deploy --yes` runs SMF's `Deploy.exe` and waits for its report.
+
 Add `--json` to any command for one JSON object in the shapes under [`schema/`](schema/) (`vmm schema` writes them; `vmm errors` lists the error codes). Exit codes: 0 ok, 2 bad usage, 3 refused by a rule, 4 changed meanwhile, 5 the game or a deploy is running, 10 unexpected. Settings in the window can put `vmm` on your PATH; nothing else does.
 
 ## AI apps

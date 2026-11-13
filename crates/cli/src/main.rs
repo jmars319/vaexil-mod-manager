@@ -29,6 +29,7 @@ Reading (never changes anything):
   vmm mods                      every mod: on or off, place in the order, type, options
   vmm mod <id>                  one mod
   vmm order                     the load order, broken rules and a suggested order
+  vmm setups                    saved setups, and the compatibility pass under way
   vmm errors                    every error code, what it means and what to do
   vmm logs [--limit <n>]        the newest events (50 by default): every change,
                                 who made it, and every failure
@@ -47,9 +48,24 @@ Changing (plan first, then apply the plan):
                                 models-textures, sound, dialogue, ui, text,
                                 other), or go back to the one its files suggest
   vmm plan order <id>...        a new load order of the mods that are on
+  vmm plan auto-sort            sort the load order by the mods' own rules
+  vmm plan use-setup <name>     switch to a saved setup
+  vmm plan save-setup <name>    save the mods that are on as a setup
+  vmm plan delete-setup <name>  delete a saved setup
+  vmm plan start-pass [--from-current]
+                                start a compatibility pass from every mod off,
+                                or with the mods on now as its baseline
+  vmm plan try-batch <id>... [--name <name>]
+                                try a batch on top of the pass's baseline
+  vmm plan mark-batch good|bad [<notes>...]
+                                mark the batch being tried
+  vmm plan end-pass             end the pass, keeping the mods as they are
+                                (setup and pass steps are planned one at a time)
   vmm plan --file <path|->      changes as JSON: a list of changes, or
                                 { \"changes\": [...] } (see `vmm schema`)
   vmm apply <plan-id> --yes     apply a plan, once, within 10 minutes
+  vmm deploy --yes              run SMF's Deploy.exe and wait for it, then
+                                show its report (refused while the game runs)
 
 For AI tools:
   vmm mcp                       an MCP server on stdin and stdout (docs/ai.md).
@@ -71,6 +87,8 @@ struct Args {
     out: Option<PathBuf>,
     file: Option<String>,
     limit: Option<usize>,
+    name: Option<String>,
+    from_current: bool,
     words: Vec<String>,
 }
 
@@ -79,7 +97,17 @@ fn usage(message: impl Into<String>) -> VmmError {
 }
 
 fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
-    let mut args = Args { json: false, yes: false, game: None, out: None, file: None, limit: None, words: vec![] };
+    let mut args = Args {
+        json: false,
+        yes: false,
+        game: None,
+        out: None,
+        file: None,
+        limit: None,
+        name: None,
+        from_current: false,
+        words: vec![],
+    };
     let mut it = raw.into_iter();
     let mut words_only = false;
     while let Some(a) = it.next() {
@@ -106,6 +134,8 @@ fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
             "--game" => args.game = Some(PathBuf::from(value("--game")?)),
             "--out" => args.out = Some(PathBuf::from(value("--out")?)),
             "--file" => args.file = Some(value("--file")?),
+            "--name" => args.name = Some(value("--name")?),
+            "--from-current" => args.from_current = true,
             "--limit" => {
                 let v = value("--limit")?;
                 args.limit = Some(v.parse().map_err(|_| usage(format!("--limit needs a number, not {v}.")))?);
@@ -252,8 +282,32 @@ fn run(args: Args) -> Result<Out, VmmError> {
             let r = e.order_report(&e.pick_game(args.game.as_deref())?)?;
             Ok(out(&r, order_text(&r)))
         }
+        ["setups"] => {
+            let e = engine();
+            let game = e.pick_game(args.game.as_deref()).ok();
+            let list = e.setup_list(game.as_ref())?;
+            Ok(out(&list, setups_text(&list)))
+        }
+        ["deploy"] => {
+            if !args.yes {
+                return Err(usage(
+                    "Deploying runs SMF's Deploy.exe, which rewrites the game's patch files. Run `vmm deploy --yes` to \
+                     confirm. Nothing was deployed.",
+                ));
+            }
+            let e = engine();
+            let game = e.pick_game(args.game.as_deref())?;
+            let show = !args.json;
+            let status = e.deploy_and_wait(&game, &mut |line| {
+                if show && !line.is_empty() {
+                    eprintln!("{line}");
+                }
+            })?;
+            let text = status.report.as_ref().map_or_else(|| "The deploy finished.\n".into(), report_text);
+            Ok(out(&status, text))
+        }
         ["plan", rest @ ..] => {
-            let changes = changes_from(rest, args.file.as_deref())?;
+            let changes = changes_from(rest, args.file.as_deref(), args.name.as_deref(), args.from_current)?;
             let e = engine();
             let plan = e.plan(&e.pick_game(args.game.as_deref())?, changes)?;
             let mut text = format!("Plan {} (apply within 10 minutes):\n", plan.plan_id);
@@ -294,7 +348,12 @@ fn run(args: Args) -> Result<Out, VmmError> {
     }
 }
 
-fn changes_from(words: &[&str], file: Option<&str>) -> Result<Vec<Change>, VmmError> {
+fn changes_from(
+    words: &[&str],
+    file: Option<&str>,
+    name: Option<&str>,
+    from_current: bool,
+) -> Result<Vec<Change>, VmmError> {
     let ids = |rest: &[&str]| rest.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     match (words, file) {
         ([], Some(path)) => {
@@ -336,6 +395,25 @@ fn changes_from(words: &[&str], file: Option<&str>) -> Result<Vec<Change>, VmmEr
             Ok(vec![Change::SetKind { mod_id: id.to_string(), kind }])
         }
         (["order", rest @ ..], None) if !rest.is_empty() => Ok(vec![Change::Reorder { order: ids(rest) }]),
+        (["auto-sort"], None) => Ok(vec![Change::AutoSort {}]),
+        (["use-setup", rest @ ..], None) if !rest.is_empty() => Ok(vec![Change::UseSetup { name: rest.join(" ") }]),
+        (["save-setup", rest @ ..], None) if !rest.is_empty() => Ok(vec![Change::SaveSetup { name: rest.join(" ") }]),
+        (["delete-setup", rest @ ..], None) if !rest.is_empty() => {
+            Ok(vec![Change::DeleteSetup { name: rest.join(" ") }])
+        }
+        (["start-pass"], None) => Ok(vec![Change::StartPass { from_current }]),
+        (["try-batch", rest @ ..], None) if !rest.is_empty() => {
+            Ok(vec![Change::TryBatch { name: name.unwrap_or_default().to_string(), mods: ids(rest) }])
+        }
+        (["mark-batch", verdict, notes @ ..], None) => {
+            let good = match *verdict {
+                "good" => true,
+                "bad" => false,
+                v => return Err(usage(format!("Mark the batch good or bad, not \u{201c}{v}\u{201d}."))),
+            };
+            Ok(vec![Change::MarkBatch { good, notes: notes.join(" ") }])
+        }
+        (["end-pass"], None) => Ok(vec![Change::EndPass {}]),
         _ => Err(usage("Plan what? Run `vmm help` for the kinds of change.")),
     }
 }
@@ -368,6 +446,36 @@ fn write_schema(folder: Option<&Path>) -> Result<Out, VmmError> {
     written.push(errors.display().to_string());
     let text = written.iter().map(|p| format!("Wrote {p}\n")).collect();
     Ok(Out { json: serde_json::json!({ "schemaVersion": SCHEMA_VERSION, "written": written }), text })
+}
+
+fn setups_text(l: &schema::SetupList) -> String {
+    let mut t = String::new();
+    if l.setups.is_empty() {
+        t += "No saved setups.\n";
+    }
+    for s in &l.setups {
+        let mark = if s.in_use { " (in use)" } else { "" };
+        t += &format!("{}{mark}: {}\n", s.name, if s.order.is_empty() { "no mods".into() } else { s.order.join(", ") });
+    }
+    match &l.pass {
+        None => t += "No compatibility pass under way.\n",
+        Some(p) => {
+            t += &format!(
+                "Compatibility pass. Baseline: {}\n",
+                if p.baseline.is_empty() { "none".into() } else { p.baseline.join(", ") }
+            );
+            for b in &p.batches {
+                let state = match b.state {
+                    schema::BatchState::Testing => "being tried",
+                    schema::BatchState::Good => "good",
+                    schema::BatchState::Bad => "bad",
+                };
+                let notes = if b.notes.is_empty() { String::new() } else { format!(" ({})", b.notes) };
+                t += &format!("  {}: {} - {state}{notes}\n", b.name, b.mods.join(", "));
+            }
+        }
+    }
+    t
 }
 
 fn log_line(e: &schema::LogEvent) -> String {

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "Switch to the setup “Just A”: these mods on, in this order: A",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": true,
+  "journalProblem": null
+}

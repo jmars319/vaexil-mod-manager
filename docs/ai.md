@@ -26,12 +26,14 @@ Each line is that app's own command for adding a server, and it changes only tha
 | `get_logs` | The newest events: every change, who made it (`gui`, `cli` or `mcp:<app>`), and every failure with its code. | No |
 | `get_deploy_report` | The last deploy, read from SMF's output: result, duration, stages, warnings grouped by kind and mod (each counted once), errors. | No |
 | `diagnose` | All of it at once for working out a problem, with paths in the user folder written as `~`. | No |
+| `get_setups` | Saved setups, and the compatibility pass under way: baseline, each batch and its result, and the mods that can go into the next batch. | No |
 | `plan_change` | Checks the changes you asked for and returns a plan: its steps in plain words and a `planId`. | No (it saves the plan for 10 minutes) |
 | `apply_plan` | Applies a plan once, if nothing it depends on has changed since. | Yes |
+| `start_deploy`, `get_deploy_status` | Runs SMF's `Deploy.exe`, then follows it to its report. | Yes (a deploy rewrites the game's patch files) |
 
 Results are the same JSON as `vmm --json`, in the shapes under [`schema/`](../schema/). Each tool declares its output schema, and the read tools are marked read-only. On failure a tool returns an error result (`isError`) holding an `ErrorReport`: a stable `code`, a `message`, a `hint` and whether retrying can work.
 
-A change is one or more of these, in order: turn mods on or off, choose a mod's options, set the type shown for a mod, or a new load order. Every check that applies in the window applies here too, and each change keeps a backup of SMF's `config.json`, as in the window. Deploying and starting the game stay in the window.
+A change is one or more of these, in order: turn mods on or off, choose a mod's options, set the type shown for a mod, a new load order, or auto-sort. A setup step (use, save, delete) or a compatibility-pass step (start, try a batch, mark it good or bad, end) is planned on its own. Every check that applies in the window applies here too, and each change keeps a backup of SMF's `config.json`, as in the window. A deploy is `start_deploy`, which, like `apply_plan`, needs your request and the Settings switch. Starting the game stays in the window.
 
 ## Your control
 
@@ -46,7 +48,11 @@ After a game update, to find which mods still work:
 
 > Start with all mods disabled.
 
-The app calls `get_status` and `list_mods`, then `plan_change` with one `setEnabled` per mod that is on. It shows you the plan, then calls `apply_plan` with that `planId` and your request. You then deploy in Vaexil Mod Manager and test the game.
+The app plans a `startPass` from every mod off, shows you the plan, and applies it with your request. Then, batch by batch, as you say:
+
+> Try the outfit mods next.
+
+It plans a `tryBatch` with those mods, applies it, and, if you ask, deploys with `start_deploy` and follows it with `get_deploy_status`. You play. "That batch crashes" becomes a `markBatch` with `good: false`, which puts the game back to the known-good baseline; "that one's fine" makes it part of the baseline. Saves are never touched.
 
 ## The command line
 
