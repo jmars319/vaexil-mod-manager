@@ -226,8 +226,10 @@ impl Engine {
         }
         // The value from before the app, kept across reconnects (say, after the
         // app moved): never record the app's own value as the one to restore.
+        // While the value is still the app's, the one to restore is the one
+        // from before the app; once someone set their own, it is theirs.
         let previous = match settings.steam_play.take() {
-            Some(h) if h.account_id == account.account_id => h.previous,
+            Some(h) if h.account_id == account.account_id && steam::is_ours(&current) => h.previous,
             _ if steam::is_ours(&current) => String::new(),
             _ => current,
         };
@@ -332,6 +334,22 @@ mod tests {
         engine.disconnect_steam_play_in(&root, false).unwrap();
         assert_eq!(std::fs::read(&localconfig).unwrap(), before);
         assert!(engine.steam_hook().is_none());
+    }
+
+    #[test]
+    fn reconnecting_after_setting_your_own_options_restores_yours() {
+        let tmp = tempfile::tempdir().unwrap();
+        let localconfig = fake_steam(&tmp.path().join("steam"), "-a");
+        let root = SteamRoot::new(tmp.path().join("steam"));
+        let engine = Engine::with_data_dir(Some(tmp.path().join("data")));
+        let exe = Path::new(r"C:\VMM\vaexil-mod-manager.exe");
+        engine.connect_steam_play_in(&root, exe, false).unwrap();
+        let text = std::fs::read_to_string(&localconfig).unwrap();
+        std::fs::write(&localconfig, steam::set_launch_options(&text, STEAM_APP_ID, "-b").unwrap()).unwrap();
+        engine.connect_steam_play_in(&root, exe, false).unwrap();
+        engine.disconnect_steam_play_in(&root, false).unwrap();
+        let text = std::fs::read_to_string(&localconfig).unwrap();
+        assert_eq!(steam::get_launch_options(&text, STEAM_APP_ID).unwrap(), "-b");
     }
 
     #[test]
