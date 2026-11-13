@@ -234,7 +234,12 @@ impl Engine {
             _ => current,
         };
         settings.steam_play = Some(SteamHook { account_id: account.account_id, previous, applied: proposed });
-        settings.save(data)?;
+        // Without this record the change couldn't be undone: if it can't be
+        // saved, put Steam's settings back as they were.
+        if let Err(e) = settings.save(data) {
+            let _ = write(&account.localconfig, &text);
+            return Err(VmmError::new(e.code, format!("{} Steam's settings were put back as they were.", e.message)));
+        }
         Ok(format!(
             "Steam's Play button for HITMAN now starts Vaexil Mod Manager ({}). A copy of Steam's settings was kept.",
             account.label()
@@ -350,6 +355,22 @@ mod tests {
         engine.disconnect_steam_play_in(&root, false).unwrap();
         let text = std::fs::read_to_string(&localconfig).unwrap();
         assert_eq!(steam::get_launch_options(&text, STEAM_APP_ID).unwrap(), "-b");
+    }
+
+    #[test]
+    fn steam_is_put_back_when_the_undo_record_cant_be_saved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let localconfig = fake_steam(&tmp.path().join("steam"), "-a");
+        let before = std::fs::read(&localconfig).unwrap();
+        let root = SteamRoot::new(tmp.path().join("steam"));
+        let data = tmp.path().join("data");
+        let engine = Engine::with_data_dir(Some(data.clone()));
+        // settings.json reads but can't be saved: a folder stands where the
+        // save's temporary file would go.
+        std::fs::create_dir_all(data.join(format!("settings.json.{}.tmp", std::process::id()))).unwrap();
+        let err = engine.connect_steam_play_in(&root, Path::new(r"C:\VMM\vaexil-mod-manager.exe"), false).unwrap_err();
+        assert!(err.message.contains("put back"), "{}", err.message);
+        assert_eq!(std::fs::read(&localconfig).unwrap(), before);
     }
 
     #[test]
