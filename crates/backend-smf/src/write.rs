@@ -3,7 +3,7 @@
 //! `settings/+page.svelte` and `getConfig` in `lib/utils.ts`, SMF 2.33.45).
 //!
 //! - On puts the mod's id into `loadOrder`, as late as its load rules allow
-//!   (see [`crate::order::insert_position`]). A mod with options and no entry
+//!   (see [`vmm_core::order::insert_position`]). A mod with options and no entry
 //!   in `modOptions` gets the options its author marked `enabledByDefault`,
 //!   which SMF's Mod Manager fills in on its next read. `Deploy.exe` applies
 //!   no options at all for a mod without an entry.
@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
+use vmm_core::error::{ErrorCode as C, VmmError};
 
 /// How many earlier copies of `config.json` the backup folder keeps.
 pub const BACKUPS_KEPT: usize = 20;
@@ -44,13 +45,16 @@ pub fn apply(
     enabled: bool,
     options: Option<&[String]>,
     place: Place,
-) -> Result<bool, String> {
+) -> Result<bool, VmmError> {
     let Some(root) = config.as_object_mut() else {
-        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+        return Err(not_an_object());
     };
     let order = root.entry("loadOrder").or_insert_with(|| Value::Array(Vec::new()));
     let Some(order) = order.as_array_mut() else {
-        return Err("The load order in SMF's config.json is not a list. Fix or reset it in SMF first.".into());
+        return Err(VmmError::new(
+            C::ConfigUnreadable,
+            "The load order in SMF's config.json is not a list. Fix or reset it in SMF first.",
+        ));
     };
     let present = order.iter().any(|v| v.as_str() == Some(mod_id));
     if enabled == present {
@@ -77,15 +81,13 @@ pub fn apply(
 }
 
 /// Sets a mod's `modOptions` entry to `values`. Returns whether it changed.
-pub fn apply_options(config: &mut Value, mod_id: &str, values: &[String]) -> Result<bool, String> {
+pub fn apply_options(config: &mut Value, mod_id: &str, values: &[String]) -> Result<bool, VmmError> {
     let Some(root) = config.as_object_mut() else {
-        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+        return Err(not_an_object());
     };
     let all = root.entry("modOptions").or_insert_with(|| Value::Object(Map::new()));
     let Some(all) = all.as_object_mut() else {
-        return Err(
-            "The mod options in SMF's config.json are not a list per mod. Fix or reset them in SMF first.".into()
-        );
+        return Err(options_not_lists());
     };
     let new = Value::Array(values.iter().cloned().map(Value::String).collect());
     if all.get(mod_id) == Some(&new) {
@@ -103,14 +105,14 @@ pub fn set_enabled(
     options: Option<&[String]>,
     place: Place,
     backup_dir: Option<&Path>,
-) -> Result<bool, String> {
+) -> Result<bool, VmmError> {
     update(smf_folder, backup_dir, |config| apply(config, mod_id, enabled, options, place))
 }
 
 /// Replaces `loadOrder` with `new_order`, which must hold the same ids.
-pub fn apply_order(config: &mut Value, new_order: &[String]) -> Result<bool, String> {
+pub fn apply_order(config: &mut Value, new_order: &[String]) -> Result<bool, VmmError> {
     let Some(root) = config.as_object_mut() else {
-        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+        return Err(not_an_object());
     };
     let current: Vec<String> = match root.get("loadOrder") {
         None => Vec::new(),
@@ -118,18 +120,21 @@ pub fn apply_order(config: &mut Value, new_order: &[String]) -> Result<bool, Str
             a.iter().filter_map(Value::as_str).map(str::to_string).collect()
         }
         Some(_) => {
-            return Err(
-                "The load order in SMF's config.json is not a plain list of mods. Fix or reset it in SMF first.".into(),
-            );
+            return Err(VmmError::new(
+                C::ConfigUnreadable,
+                "The load order in SMF's config.json is not a plain list of mods. Fix or reset it in SMF first.",
+            ));
         }
     };
     let (mut a, mut b) = (current.clone(), new_order.to_vec());
     a.sort();
     b.sort();
     if a != b {
-        return Err("SMF's load order changed while you were reordering it (a mod was turned on or off elsewhere). \
-                    Nothing was saved. Look at the new order and try again."
-            .into());
+        return Err(VmmError::new(
+            C::OrderMismatch,
+            "SMF's load order changed while you were reordering it (a mod was turned on or off elsewhere). \
+             Nothing was saved. Look at the new order and try again.",
+        ));
     }
     if current == new_order {
         return Ok(false);
@@ -144,18 +149,16 @@ pub fn apply_setup(
     config: &mut Value,
     order: &[String],
     options: &std::collections::BTreeMap<String, Vec<String>>,
-) -> Result<bool, String> {
+) -> Result<bool, VmmError> {
     let Some(root) = config.as_object_mut() else {
-        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+        return Err(not_an_object());
     };
     let before = Value::Object(root.clone());
     root.insert("loadOrder".into(), Value::Array(order.iter().cloned().map(Value::String).collect()));
     if !options.is_empty() {
         let all = root.entry("modOptions").or_insert_with(|| Value::Object(Map::new()));
         let Some(all) = all.as_object_mut() else {
-            return Err(
-                "The mod options in SMF's config.json are not a list per mod. Fix or reset them in SMF first.".into()
-            );
+            return Err(options_not_lists());
         };
         for (id, values) in options {
             all.insert(id.clone(), Value::Array(values.iter().cloned().map(Value::String).collect()));
@@ -165,7 +168,7 @@ pub fn apply_setup(
 }
 
 /// Saves a reordered load order in `config.json`. See [`update`].
-pub fn set_load_order(smf_folder: &Path, order: &[String], backup_dir: Option<&Path>) -> Result<bool, String> {
+pub fn set_load_order(smf_folder: &Path, order: &[String], backup_dir: Option<&Path>) -> Result<bool, VmmError> {
     update(smf_folder, backup_dir, |config| apply_order(config, order))
 }
 
@@ -175,7 +178,7 @@ pub fn set_options(
     mod_id: &str,
     values: &[String],
     backup_dir: Option<&Path>,
-) -> Result<bool, String> {
+) -> Result<bool, VmmError> {
     update(smf_folder, backup_dir, |config| apply_options(config, mod_id, values))
 }
 
@@ -186,19 +189,25 @@ pub fn set_options(
 pub fn update(
     smf_folder: &Path,
     backup_dir: Option<&Path>,
-    change: impl FnOnce(&mut Value) -> Result<bool, String>,
-) -> Result<bool, String> {
+    change: impl FnOnce(&mut Value) -> Result<bool, VmmError>,
+) -> Result<bool, VmmError> {
     let path = smf_folder.join("config.json");
-    let original = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
-    let mut config: Value = json5::from_str(original.trim_start_matches('\u{feff}'))
-        .map_err(|e| format!("SMF's config.json is not valid JSON ({e}). Fix or reset it in SMF before continuing."))?;
+    let original = std::fs::read_to_string(&path)
+        .map_err(|e| VmmError::new(C::Io, format!("Could not read {}: {e}", path.display())))?;
+    let mut config: Value = json5::from_str(original.trim_start_matches('\u{feff}')).map_err(|e| {
+        VmmError::new(
+            C::ConfigUnreadable,
+            format!("SMF's config.json is not valid JSON ({e}). Fix or reset it in SMF before continuing."),
+        )
+    })?;
     if !change(&mut config)? {
         return Ok(false);
     }
     let mut text = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
     let mut ser = serde_json::Serializer::with_formatter(&mut text, formatter);
-    serde::Serialize::serialize(&config, &mut ser).map_err(|e| format!("Could not write the new settings: {e}"))?;
+    serde::Serialize::serialize(&config, &mut ser)
+        .map_err(|e| VmmError::new(C::SaveFailed, format!("Could not write the new settings: {e}")))?;
     text.push(b'\n');
 
     if let Some(dir) = backup_dir {
@@ -210,22 +219,27 @@ pub fn update(
 
 /// Writes `text` beside `path` and renames it over `path`, unless `path` no
 /// longer holds `original`. The temporary file never outlives the call.
-fn replace_if_unchanged(path: &Path, original: &str, text: &[u8]) -> Result<(), String> {
+fn replace_if_unchanged(path: &Path, original: &str, text: &[u8]) -> Result<(), VmmError> {
     let temp = path.with_file_name(temp_name());
     let result = std::fs::write(&temp, text)
-        .map_err(|e| format!("Could not save SMF's config.json: {e}. Nothing was changed."))
+        .map_err(|e| {
+            VmmError::new(C::SaveFailed, format!("Could not save SMF's config.json: {e}. Nothing was changed."))
+        })
         .and_then(|()| {
             if std::fs::read_to_string(path).ok().as_deref() == Some(original) {
                 Ok(())
             } else {
-                Err("Another program changed SMF's config.json while this change was being saved. \
-                     Nothing was changed. Try again."
-                    .to_string())
+                Err(VmmError::new(
+                    C::ConfigChangedMeanwhile,
+                    "Another program changed SMF's config.json while this change was being saved. \
+                     Nothing was changed. Try again.",
+                ))
             }
         })
         .and_then(|()| {
-            std::fs::rename(&temp, path)
-                .map_err(|e| format!("Could not save SMF's config.json: {e}. Nothing was changed."))
+            std::fs::rename(&temp, path).map_err(|e| {
+                VmmError::new(C::SaveFailed, format!("Could not save SMF's config.json: {e}. Nothing was changed."))
+            })
         });
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
@@ -235,9 +249,12 @@ fn replace_if_unchanged(path: &Path, original: &str, text: &[u8]) -> Result<(), 
 
 /// Saves `text` as `config-<milliseconds>.json` and keeps the newest
 /// [`BACKUPS_KEPT`]. A failed backup stops the write.
-fn backup(dir: &Path, text: &str) -> Result<PathBuf, String> {
+fn backup(dir: &Path, text: &str) -> Result<PathBuf, VmmError> {
     let fail = |e: std::io::Error| {
-        format!("Could not keep a copy of SMF's config.json in {}: {e}. Nothing was changed.", dir.display())
+        VmmError::new(
+            C::BackupUnavailable,
+            format!("Could not keep a copy of SMF's config.json in {}: {e}. Nothing was changed.", dir.display()),
+        )
     };
     std::fs::create_dir_all(dir).map_err(fail)?;
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
@@ -262,6 +279,20 @@ fn backup(dir: &Path, text: &str) -> Result<PathBuf, String> {
         let _ = std::fs::remove_file(p);
     }
     Ok(file)
+}
+
+fn not_an_object() -> VmmError {
+    VmmError::new(
+        C::ConfigUnreadable,
+        "SMF's config.json does not hold a settings object. Fix or reset it in SMF first.",
+    )
+}
+
+fn options_not_lists() -> VmmError {
+    VmmError::new(
+        C::ConfigUnreadable,
+        "The mod options in SMF's config.json are not a list per mod. Fix or reset them in SMF first.",
+    )
 }
 
 #[cfg(test)]
@@ -385,10 +416,10 @@ mod tests {
         assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
         for wrong in [vec!["A".to_string()], vec!["A".into(), "B".into(), "C".into()], vec!["A".into(), "C".into()]] {
             let err = set_load_order(tmp.path(), &wrong, None).unwrap_err();
-            assert!(err.contains("Nothing was saved"), "{err}");
+            assert!(err.message.contains("Nothing was saved"), "{err}");
         }
         let tmp = folder_with("{ loadOrder: ['A', 7] }");
-        assert!(set_load_order(tmp.path(), &["A".into()], None).unwrap_err().contains("plain list"));
+        assert!(set_load_order(tmp.path(), &["A".into()], None).unwrap_err().message.contains("plain list"));
     }
 
     #[test]
@@ -426,7 +457,7 @@ mod tests {
         let blocker = tmp.path().join("not-a-folder");
         std::fs::write(&blocker, "").unwrap();
         let err = set_enabled(tmp.path(), "C", true, None, None, Some(&blocker)).unwrap_err();
-        assert!(err.contains("Nothing was changed"), "{err}");
+        assert!(err.message.contains("Nothing was changed"), "{err}");
         assert_eq!(std::fs::read_to_string(tmp.path().join("config.json")).unwrap(), SMF_WRITTEN);
     }
 
@@ -445,7 +476,7 @@ mod tests {
         let path = tmp.path().join("config.json");
         // This process read SMF_WRITTEN; another program has saved since.
         let err = replace_if_unchanged(&path, SMF_WRITTEN, b"{}").unwrap_err();
-        assert!(err.contains("Another program"), "{err}");
+        assert!(err.message.contains("Another program"), "{err}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{loadOrder:['Elsewhere']}");
         assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1, "the temporary file was left behind");
 

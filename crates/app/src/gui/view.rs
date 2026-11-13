@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use vmm_core::framework::{Framework, Inspection, ModEntry, ModKind, Status, Version};
+use vmm_core::backend::{Backend, Inspection, ModEntry, ModKind, Status, Version};
 use vmm_core::game::GameInstall;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +53,7 @@ pub struct Row {
 
 /// `kinds` holds the types the user chose, by mod id; they replace the ones
 /// worked out from each mod's files.
-pub fn build(installs: &[GameInstall], framework: &dyn Framework, kinds: &BTreeMap<String, ModKind>) -> View {
+pub fn build(installs: &[GameInstall], framework: &dyn Backend, kinds: &BTreeMap<String, ModKind>) -> View {
     let Some(game) = installs.first() else {
         return message(
             "Not found",
@@ -198,36 +198,40 @@ mod tests {
 
     struct Fake(Inspection);
 
-    impl Framework for Fake {
+    impl Backend for Fake {
         fn name(&self) -> &'static str {
             "Simple Mod Framework"
         }
         fn inspect(&self, _: &GameInstall) -> Inspection {
             self.0.clone()
         }
-        fn set_enabled(&self, _: &GameInstall, _: &str, _: bool) -> Result<bool, String> {
+        fn set_enabled(&self, _: &GameInstall, _: &str, _: bool) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }
-        fn set_options(&self, _: &GameInstall, _: &str, _: &[String]) -> Result<bool, String> {
+        fn set_options(&self, _: &GameInstall, _: &str, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }
-        fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, String> {
+        fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }
-        fn current_setup(&self, _: &GameInstall) -> Result<vmm_core::framework::Setup, String> {
+        fn current_setup(&self, _: &GameInstall) -> Result<vmm_core::backend::Setup, vmm_core::error::VmmError> {
             unreachable!("the view reads only the inspection")
         }
-        fn apply_setup(&self, _: &GameInstall, _: &vmm_core::framework::Setup) -> Result<Vec<String>, String> {
+        fn apply_setup(
+            &self,
+            _: &GameInstall,
+            _: &vmm_core::backend::Setup,
+        ) -> Result<Vec<String>, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
         }
-        fn deploy_fingerprint(&self, _: &GameInstall) -> Result<String, String> {
+        fn deploy_fingerprint(&self, _: &GameInstall) -> Result<String, vmm_core::error::VmmError> {
             unreachable!("the view reads only the inspection")
         }
         fn deploy(
             &self,
             _: &GameInstall,
             _: &mut dyn FnMut(&str),
-        ) -> Result<vmm_core::framework::DeployOutcome, String> {
+        ) -> Result<vmm_core::backend::DeployOutcome, vmm_core::error::VmmError> {
             unreachable!("the view never deploys")
         }
     }
@@ -250,7 +254,7 @@ mod tests {
         }
     }
 
-    fn build(installs: &[GameInstall], framework: &dyn Framework) -> View {
+    fn build(installs: &[GameInstall], framework: &dyn Backend) -> View {
         super::build(installs, framework, &BTreeMap::new())
     }
 
@@ -327,7 +331,7 @@ mod tests {
     #[test]
     fn the_users_type_wins_and_options_are_counted() {
         let mut two = entry("Two", ModKind::Gameplay, Some(1));
-        let option = vmm_core::framework::ModOption {
+        let option = vmm_core::backend::ModOption {
             value: "X".into(),
             label: "X".into(),
             group: None,

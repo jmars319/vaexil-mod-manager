@@ -5,23 +5,34 @@
 use std::path::Path;
 
 use serde_json::{Map, Value};
+use vmm_core::error::{ErrorCode, VmmError};
 
-pub fn load(dir: &Path, file: &str) -> Result<Map<String, Value>, String> {
+pub fn load(dir: &Path, file: &str) -> Result<Map<String, Value>, VmmError> {
     let path = dir.join(file);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
-        Err(e) => return Err(format!("Could not read {}: {e}", path.display())),
+        Err(e) => {
+            return Err(VmmError::new(ErrorCode::SettingsUnreadable, format!("Could not read {}: {e}", path.display())));
+        }
     };
     match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
         Ok(Value::Object(map)) => Ok(map),
-        Ok(_) => Err(format!("{} does not hold a settings object. Fix or remove it.", path.display())),
-        Err(e) => Err(format!("{} can't be read ({e}). Fix or remove it.", path.display())),
+        Ok(_) => Err(VmmError::new(
+            ErrorCode::SettingsUnreadable,
+            format!("{} does not hold a settings object. Fix or remove it.", path.display()),
+        )),
+        Err(e) => Err(VmmError::new(
+            ErrorCode::SettingsUnreadable,
+            format!("{} can't be read ({e}). Fix or remove it.", path.display()),
+        )),
     }
 }
 
-pub fn save(dir: &Path, file: &str, map: &Map<String, Value>) -> Result<(), String> {
-    let fail = |e: std::io::Error| format!("Could not save {} in {}: {e}", file, dir.display());
+pub fn save(dir: &Path, file: &str, map: &Map<String, Value>) -> Result<(), VmmError> {
+    let fail = |e: std::io::Error| {
+        VmmError::new(ErrorCode::SaveFailed, format!("Could not save {} in {}: {e}", file, dir.display()))
+    };
     std::fs::create_dir_all(dir).map_err(fail)?;
     let mut text = serde_json::to_string_pretty(&Value::Object(map.clone())).expect("a JSON object always serializes");
     text.push('\n');

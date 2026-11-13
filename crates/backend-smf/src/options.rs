@@ -8,8 +8,8 @@
 //!   used: SMF drops it from `modOptions` on its next read.
 
 use serde_json::Value;
-
-use crate::framework::ModOption;
+use vmm_core::backend::ModOption;
+use vmm_core::error::{ErrorCode as C, VmmError};
 
 struct Choice<'a> {
     value: String,
@@ -101,15 +101,18 @@ pub fn describe(options: &[Value], stored: Option<&[String]>, load_order: &[Stri
 /// to store. Every select group gets one choice: the one picked, or failing
 /// that its default, or failing that its first option, counting only options
 /// whose required mods are on. A group with none of those gets no choice.
-pub fn validate(options: &[Value], picked: &[String], load_order: &[String]) -> Result<Vec<String>, String> {
+pub fn validate(options: &[Value], picked: &[String], load_order: &[String]) -> Result<Vec<String>, VmmError> {
     let all = choices(options);
     for p in picked {
         let Some(c) = all.iter().find(|c| c.value == *p) else {
-            return Err(format!("\"{p}\" is not one of this mod's options."));
+            return Err(VmmError::new(C::OptionInvalid, format!("\"{p}\" is not one of this mod's options.")));
         };
         let needs = missing(c, load_order);
         if !needs.is_empty() {
-            return Err(format!("\"{}\" needs {} turned on first.", c.name, needs.join(", ")));
+            return Err(VmmError::new(
+                C::OptionRequirementOff,
+                format!("\"{}\" needs {} turned on first.", c.name, needs.join(", ")),
+            ));
         }
     }
     let mut out = Vec::new();
@@ -126,7 +129,7 @@ pub fn validate(options: &[Value], picked: &[String], load_order: &[String]) -> 
                 let in_group: Vec<&Choice> = all.iter().filter(|o| o.group == Some(g)).collect();
                 let chosen: Vec<&&Choice> = in_group.iter().filter(|o| picked.contains(&o.value)).collect();
                 if chosen.len() > 1 {
-                    return Err(format!("Only one choice can be picked for \"{g}\"."));
+                    return Err(VmmError::new(C::OptionInvalid, format!("Only one choice can be picked for \"{g}\".")));
                 }
                 let usable: Vec<&&Choice> = in_group.iter().filter(|o| missing(o, load_order).is_empty()).collect();
                 let pick = chosen
@@ -215,11 +218,11 @@ mod tests {
 
     #[test]
     fn validate_refuses_what_smf_would_drop() {
-        assert!(validate(&opts(), &["Nope".into()], &[]).unwrap_err().contains("not one of"));
-        assert!(validate(&opts(), &["With A".into()], &[]).unwrap_err().contains("needs Mod.A"));
+        assert!(validate(&opts(), &["Nope".into()], &[]).unwrap_err().message.contains("not one of"));
+        assert!(validate(&opts(), &["With A".into()], &[]).unwrap_err().message.contains("needs Mod.A"));
         assert!(validate(&opts(), &["With A".into()], &["Mod.A".into()]).is_ok());
         let both = vec!["Hands:Bare hands".to_string(), "Hands:Gloves".to_string()];
-        assert!(validate(&opts(), &both, &[]).unwrap_err().contains("Only one"));
+        assert!(validate(&opts(), &both, &[]).unwrap_err().message.contains("Only one"));
         assert!(validate(&opts(), &["Epic".into()], &[]).is_err());
     }
 }

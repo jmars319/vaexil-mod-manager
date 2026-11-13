@@ -3,27 +3,24 @@
 //! `config.json` when a switch is used, opens the edit sheet for a mod's
 //! type and options, and shows the Load order view, whose changes are a draft
 //! until Save. It also deploys and starts the game, keeps setups, and runs
-//! compatibility passes (see `wire`).
+//! compatibility passes (see `wire`). Everything it does goes through
+//! `vmm-engine`; this module only turns the engine's answers into the window.
 
 mod order_view;
-mod play;
 mod sheet;
 mod view;
 mod wire;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-use vmm_core::framework::{Framework, ModEntry};
+use vmm_core::backend::ModEntry;
 use vmm_core::game::GameInstall;
-use vmm_core::smf::Smf;
+use vmm_engine::Engine;
 
-use crate::settings::Settings;
-use crate::setups::Setups;
 use crate::{AppWindow, EditState, Message, ModRow, OptCheck, OptSelect, OrderRowData, OrderState, Ui};
 
 pub fn run() -> i32 {
@@ -41,31 +38,14 @@ pub fn run() -> i32 {
     g.set_mods(ModelRc::from(rows.clone()));
     g.set_notes(ModelRc::from(notes.clone()));
 
-    // Without its own folder the app can't keep a copy of config.json, so
-    // it reads but never writes.
-    let data_dir = crate::platform::data_dir();
-    let can_write = data_dir.is_some();
-    let smf = Rc::new(match &data_dir {
-        Some(dir) => Smf::with_backups(dir.join("config-backups")),
-        None => Smf::default(),
-    });
-    let settings = match &data_dir {
-        Some(dir) => Settings::load(dir),
-        None => Ok(Settings::default()),
-    };
-    let setups = match &data_dir {
-        Some(dir) => Setups::load(dir),
-        None => Ok(Setups::default()),
-    };
-    let record = data_dir.as_deref().map(play::Record::load).unwrap_or_default();
+    // Without its own folder the engine can't keep a copy of config.json, so
+    // it refuses every change.
     let state = Rc::new(State {
-        smf,
+        engine: Engine::open(),
         rows,
         notes,
         game: RefCell::default(),
         error: RefCell::default(),
-        data_dir,
-        settings: RefCell::new(settings),
         sheet: RefCell::default(),
         checks: Rc::new(VecModel::default()),
         selects: Rc::new(VecModel::default()),
@@ -73,9 +53,6 @@ pub fn run() -> i32 {
         draft: RefCell::default(),
         order_note: RefCell::default(),
         order_rows: Rc::new(VecModel::default()),
-        deploy: play::Shared::default(),
-        record: RefCell::new(record),
-        setups: RefCell::new(setups),
         pass_candidates: RefCell::default(),
         pass_picked: RefCell::default(),
         fingerprint: RefCell::default(),
@@ -99,10 +76,7 @@ pub fn run() -> i32 {
             let Some(ui) = weak.upgrade() else { return };
             let game = state.game.borrow().clone();
             let result = match &game {
-                _ if !can_write => Err("Windows didn't say where your local app data folder is (%LOCALAPPDATA%), \
-                                        so there is nowhere to keep a copy of SMF's config.json. Nothing was changed."
-                    .to_string()),
-                Some(game) => state.smf.set_enabled(game, &id, on),
+                Some(game) => state.engine.set_enabled(game, &id, on).map_err(|e| e.message),
                 None => Err("HITMAN is no longer where it was. Nothing was changed.".to_string()),
             };
             *state.error.borrow_mut() =
@@ -133,17 +107,13 @@ pub fn run() -> i32 {
 
 /// What the window's callbacks share.
 struct State {
-    smf: Rc<Smf>,
+    engine: Engine,
     rows: Rc<VecModel<ModRow>>,
     notes: Rc<VecModel<Message>>,
     /// The install the list shows, which a switch acts on.
     game: RefCell<Option<GameInstall>>,
     /// The last change that failed, shown until the next one succeeds.
     error: RefCell<Option<String>>,
-    data_dir: Option<PathBuf>,
-    /// The app's own settings, or why they can't be read. Unreadable
-    /// settings are never overwritten.
-    settings: RefCell<Result<Settings, String>>,
     /// The open edit sheet, if any.
     sheet: RefCell<Option<sheet::EditSheet>>,
     checks: Rc<VecModel<OptCheck>>,
@@ -155,12 +125,6 @@ struct State {
     /// A line about the last load-order action, such as what Auto-sort did.
     order_note: RefCell<Option<Message>>,
     order_rows: Rc<VecModel<OrderRowData>>,
-    /// The deploy in progress, shared with its worker thread.
-    deploy: play::Shared,
-    /// The last finished deploy.
-    record: RefCell<play::Record>,
-    /// Saved setups and the compatibility pass, or why they can't be read.
-    setups: RefCell<Result<Setups, String>>,
     /// The ids behind the pass view's candidate rows, in row order.
     pass_candidates: RefCell<Vec<String>>,
     /// The candidates ticked for the next batch.
@@ -250,10 +214,7 @@ fn wire_order(ui: &AppWindow, state: &Rc<State>) {
             let Some(draft) = state.draft.borrow().clone() else { return };
             let game = state.game.borrow().clone();
             let result = match &game {
-                _ if state.data_dir.is_none() => Err("Windows didn't say where your local app data folder is \
-                     (%LOCALAPPDATA%), so there is nowhere to keep a copy of SMF's config.json. Nothing was saved."
-                    .to_string()),
-                Some(game) => state.smf.set_load_order(game, &draft),
+                Some(game) => state.engine.set_load_order(game, &draft).map_err(|e| e.message),
                 None => Err("HITMAN is no longer where it was. Nothing was saved.".to_string()),
             };
             *state.order_note.borrow_mut() = Some(match result {
@@ -293,8 +254,8 @@ fn wire_sheet(ui: &AppWindow, state: &Rc<State>) {
             let Some(ui) = weak.upgrade() else { return };
             let game = state.game.borrow().clone();
             let Some(game) = game else { return };
-            let Some(m) = state.smf.inspect(&game).mods.into_iter().find(|m| m.id == id.as_str()) else { return };
-            let chosen = state.settings.borrow().as_ref().ok().and_then(|s| s.kind_overrides.get(&m.id).copied());
+            let Some(m) = state.engine.inspect(&game).mods.into_iter().find(|m| m.id == id.as_str()) else { return };
+            let chosen = state.engine.kind_overrides().get(&m.id).copied();
             let s = sheet::EditSheet::new(&m, m.kind, chosen);
             show_sheet(&ui, &state, &s, "");
             *state.sheet.borrow_mut() = Some(s);
@@ -364,9 +325,9 @@ fn show_sheet(ui: &AppWindow, state: &State, s: &sheet::EditSheet, error: &str) 
         s.kind_labels.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>(),
     )));
     es.set_kind_index(s.kind_index as i32);
-    let settings_error = state.settings.borrow().as_ref().err().cloned();
-    es.set_kind_enabled(settings_error.is_none() && state.data_dir.is_some());
-    es.set_note(settings_error.unwrap_or_default().into());
+    let settings_problem = state.engine.settings_problem();
+    es.set_kind_enabled(settings_problem.is_none());
+    es.set_note(settings_problem.unwrap_or_default().into());
     state.checks.set_vec(
         s.checks
             .iter()
@@ -399,40 +360,20 @@ fn show_sheet(ui: &AppWindow, state: &State, s: &sheet::EditSheet, error: &str) 
 fn save_sheet(state: &State, s: &sheet::EditSheet) -> Result<(), String> {
     if s.options_changed() {
         let game = state.game.borrow().clone().ok_or("HITMAN is no longer where it was. Nothing was changed.")?;
-        if state.data_dir.is_none() {
-            return Err("Windows didn't say where your local app data folder is (%LOCALAPPDATA%), so there is \
-                        nowhere to keep a copy of SMF's config.json. Nothing was changed."
-                .into());
-        }
-        state.smf.set_options(&game, &s.mod_id, &s.chosen())?;
+        state.engine.set_options(&game, &s.mod_id, &s.chosen()).map_err(|e| e.message)?;
     }
     if s.kind_changed() {
-        let dir = state.data_dir.clone().ok_or("There is no folder to keep the type in. The type was not changed.")?;
-        // Read the file again rather than trusting what was read at start: a
-        // second window may have saved since, and its change must survive.
-        let mut settings = Settings::load(&dir)?;
-        match s.kind() {
-            Some(k) => settings.kind_overrides.insert(s.mod_id.clone(), k),
-            None => settings.kind_overrides.remove(&s.mod_id),
-        };
-        settings.save(&dir)?;
-        *state.settings.borrow_mut() = Ok(settings);
+        state.engine.set_kind(&s.mod_id, s.kind()).map_err(|e| e.message)?;
     }
     Ok(())
 }
 
 fn refresh(ui: &AppWindow, state: &State) {
-    let installs = match crate::platform::game_override() {
-        Some(game) => vec![game],
-        None => vmm_core::game::find_installs(&crate::platform::sources()),
-    };
+    let installs = state.engine.installs();
     *state.game.borrow_mut() = installs.first().cloned();
-    // Reread the settings, so a type saved in another window shows here too.
-    if let Some(dir) = &state.data_dir {
-        *state.settings.borrow_mut() = Settings::load(dir);
-    }
-    let kinds = state.settings.borrow().as_ref().map(|s| s.kind_overrides.clone()).unwrap_or_default();
-    let v = view::build(&installs, state.smf.as_ref(), &kinds);
+    // Read again each time, so a type saved in another window shows here too.
+    let kinds = state.engine.kind_overrides();
+    let v = view::build(&installs, state.engine.backend(), &kinds);
     let g = ui.global::<Ui>();
     g.set_screen(match v.screen {
         view::Screen::Mods => "mods".into(),
@@ -502,8 +443,13 @@ fn refresh(ui: &AppWindow, state: &State) {
     g.set_order_note_error(note.error);
     wire::refresh_extras(ui, state);
     let error = state.error.borrow().clone().map(|text| Message { text: text.into(), error: true });
-    let settings_error =
-        state.settings.borrow().as_ref().err().map(|text| Message { text: text.clone().into(), error: false });
+    // Only an unreadable settings file is noted here; a missing data folder
+    // shows where it matters, when a change is refused.
+    let settings_error = state
+        .engine
+        .settings_problem()
+        .filter(|_| state.engine.data_dir().is_some())
+        .map(|text| Message { text: text.into(), error: false });
     let notes = error
         .into_iter()
         .chain(settings_error)

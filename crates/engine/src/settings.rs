@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
-use vmm_core::framework::ModKind;
+use vmm_core::backend::ModKind;
+use vmm_core::error::{ErrorCode, VmmError};
 
 const FILE: &str = "settings.json";
 
@@ -22,17 +23,25 @@ pub struct Settings {
 impl Settings {
     /// Reads `settings.json` from `dir`. A missing file is empty settings; a
     /// file that can't be read is an error, so it is never overwritten.
-    pub fn load(dir: &Path) -> Result<Settings, String> {
+    pub fn load(dir: &Path) -> Result<Settings, VmmError> {
         let path = dir.join(FILE);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
-            Err(e) => return Err(format!("Could not read {}: {e}", path.display())),
+            Err(e) => {
+                return Err(VmmError::new(
+                    ErrorCode::SettingsUnreadable,
+                    format!("Could not read {}: {e}", path.display()),
+                ));
+            }
         };
         let unreadable = |why: String| {
-            format!(
-                "Vaexil Mod Manager's settings file can't be read ({why}), so type changes are off until it is fixed or removed: {}",
-                path.display()
+            VmmError::new(
+                ErrorCode::SettingsUnreadable,
+                format!(
+                    "Vaexil Mod Manager's settings file can't be read ({why}), so type changes are off until it is fixed or removed: {}",
+                    path.display()
+                ),
             )
         };
         let mut rest = match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
@@ -54,9 +63,13 @@ impl Settings {
     }
 
     /// Writes `settings.json` in `dir`, replacing it in one rename.
-    pub fn save(&self, dir: &Path) -> Result<(), String> {
-        let fail =
-            |e: std::io::Error| format!("Could not save Vaexil Mod Manager's settings in {}: {e}", dir.display());
+    pub fn save(&self, dir: &Path) -> Result<(), VmmError> {
+        let fail = |e: std::io::Error| {
+            VmmError::new(
+                ErrorCode::SaveFailed,
+                format!("Could not save Vaexil Mod Manager's settings in {}: {e}", dir.display()),
+            )
+        };
         std::fs::create_dir_all(dir).map_err(fail)?;
         let mut map = self.rest.clone();
         map.insert(
@@ -114,7 +127,7 @@ mod tests {
         for bad in ["{ not json", "[1]", r#"{ "kindOverrides": [] }"#] {
             std::fs::write(tmp.path().join(FILE), bad).unwrap();
             let err = Settings::load(tmp.path()).unwrap_err();
-            assert!(err.contains("type changes are off"), "{err}");
+            assert!(err.message.contains("type changes are off"), "{err}");
             assert_eq!(std::fs::read_to_string(tmp.path().join(FILE)).unwrap(), bad);
         }
     }

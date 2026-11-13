@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::framework::{ModEntry, Relation};
+use crate::backend::{ModEntry, Relation};
 
 /// A rule the order does not keep: `mod_id` should load `relation` `other`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +146,7 @@ pub fn overridden_by(order: &[String], mods: &[ModEntry]) -> BTreeMap<String, Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::framework::OrderRule;
+    use crate::backend::OrderRule;
 
     fn m(id: &str, rules: &[(Relation, &str)], replaces: &[&str]) -> ModEntry {
         ModEntry {

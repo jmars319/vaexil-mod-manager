@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use vmm_core::framework::{ModEntry, ModKind, Relation};
+use vmm_core::backend::{ModEntry, ModKind, Relation};
 use vmm_core::order;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -111,7 +111,7 @@ pub fn moved(order: &[String], from: usize, delta: i32) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use vmm_core::framework::OrderRule;
+    use vmm_core::backend::OrderRule;
 
     use super::*;
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/app"]
+members = ["crates/core", "crates/backend-smf", "crates/engine", "crates/app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,8 @@ publish = false
 
 [workspace.dependencies]
 vmm-core = { path = "crates/core", version = "0.1.0" }
+vmm-backend-smf = { path = "crates/backend-smf", version = "0.1.0" }
+vmm-engine = { path = "crates/engine", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 json5 = "1.3"
