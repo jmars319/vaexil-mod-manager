@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "usage.invalid",
+    "message": "Unknown command “frobnicate”. Run `vmm help` for the commands.",
+    "hint": "Run `vmm help` for the commands. Changes need --yes.",
+    "retryable": false,
+    "exitCode": 2
+  }
+}

@@ -25,6 +25,7 @@ use vmm_core::backend::{
 };
 use vmm_core::error::{ErrorCode as C, VmmError};
 use vmm_core::game::GameInstall;
+use vmm_core::schema::{Capabilities, DeployMethod, NativeMods, NativeModsStatus};
 
 /// A file SMF itself keeps in `Mods`; it is not a mod.
 const MANAGED_MARKER: &str = "Managed by SMF, do not touch";
@@ -64,8 +65,34 @@ impl Smf {
 }
 
 impl Backend for Smf {
+    fn id(&self) -> &'static str {
+        "smf"
+    }
+
     fn name(&self) -> &'static str {
         "Simple Mod Framework"
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            orders: vec!["smf".into()],
+            options: true,
+            deploy: DeployMethod::ExternalTool,
+            needs_deploy: true,
+        }
+    }
+
+    fn native_mods(&self) -> NativeMods {
+        NativeMods {
+            status: NativeModsStatus::None,
+            explanation: "HITMAN World of Assassination has no mod system of its own. Every mod goes through SMF, \
+                          and SMF's Deploy.exe builds the game's patch files."
+                .into(),
+        }
+    }
+
+    fn state_files(&self, game: &GameInstall) -> Vec<PathBuf> {
+        find_folder(&game.root).map(|f| vec![f.join("config.json")]).unwrap_or_default()
     }
 
     fn inspect(&self, game: &GameInstall) -> Inspection {

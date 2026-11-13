@@ -7,10 +7,24 @@ use std::path::PathBuf;
 
 use crate::error::VmmError;
 use crate::game::GameInstall;
+use crate::schema::{Capabilities, NativeMods};
 
 pub trait Backend {
+    /// A stable id for tools and saved files, such as `smf`.
+    fn id(&self) -> &'static str;
+
     /// The name shown in the window, such as "Simple Mod Framework".
     fn name(&self) -> &'static str;
+
+    /// What the backend can do: its load orders, options, and how it deploys.
+    fn capabilities(&self) -> Capabilities;
+
+    /// How the backend lives alongside the game's own mod system.
+    fn native_mods(&self) -> NativeMods;
+
+    /// The files the backend's settings live in for this install. A plan
+    /// records their hashes and applying it refuses if any has changed.
+    fn state_files(&self, game: &GameInstall) -> Vec<PathBuf>;
 
     /// Reads the framework's state for one game install. Never writes.
     fn inspect(&self, game: &GameInstall) -> Inspection;
@@ -102,7 +116,21 @@ impl Version {
 
 /// What a mod mostly changes, for grouping the Mods view. Information only:
 /// it never affects what the framework loads.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum ModKind {
     Gameplay,
     ModelsTextures,

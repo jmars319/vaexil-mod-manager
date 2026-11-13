@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "game": {
+    "id": "hitman-woa",
+    "name": "HITMAN World of Assassination",
+    "store": "Folder",
+    "folder": "<tmp>/game"
+  },
+  "mods": [
+    {
+      "id": "A",
+      "name": "A mod",
+      "version": "1.0.0",
+      "authors": [
+        "Someone"
+      ],
+      "kind": "other",
+      "kindSource": "files",
+      "enabled": true,
+      "position": 1,
+      "badge": null,
+      "problem": null,
+      "options": [],
+      "loadBefore": [],
+      "loadAfter": [],
+      "replacedBy": [],
+      "folder": "<tmp>/game/Simple Mod Framework/Mods/A"
+    },
+    {
+      "id": "B",
+      "name": "B mod",
+      "version": null,
+      "authors": [],
+      "kind": "other",
+      "kindSource": "files",
+      "enabled": false,
+      "position": null,
+      "badge": null,
+      "problem": null,
+      "options": [],
+      "loadBefore": [],
+      "loadAfter": [
+        "A"
+      ],
+      "replacedBy": [],
+      "folder": "<tmp>/game/Simple Mod Framework/Mods/B"
+    },
+    {
+      "id": "C",
+      "name": "C mod",
+      "version": null,
+      "authors": [],
+      "kind": "other",
+      "kindSource": "files",
+      "enabled": false,
+      "position": null,
+      "badge": null,
+      "problem": null,
+      "options": [
+        {
+          "value": "X",
+          "label": "X",
+          "group": null,
+          "tooltip": null,
+          "chosen": true,
+          "needs": []
+        }
+      ],
+      "loadBefore": [],
+      "loadAfter": [],
+      "replacedBy": [],
+      "folder": "<tmp>/game/Simple Mod Framework/Mods/C"
+    }
+  ]
+}

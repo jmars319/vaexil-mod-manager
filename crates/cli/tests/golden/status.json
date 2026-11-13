@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "appVersion": "<appVersion>",
+  "game": {
+    "id": "hitman-woa",
+    "name": "HITMAN World of Assassination",
+    "store": "Folder",
+    "folder": "<tmp>/game"
+  },
+  "backend": {
+    "id": "smf",
+    "name": "Simple Mod Framework",
+    "state": "installed",
+    "version": null,
+    "unknownVersionSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "folder": "<tmp>/game/Simple Mod Framework",
+    "problem": null,
+    "capabilities": {
+      "orders": [
+        "smf"
+      ],
+      "options": true,
+      "deploy": "external_tool",
+      "needsDeploy": true
+    },
+    "nativeMods": {
+      "status": "none",
+      "explanation": "HITMAN World of Assassination has no mod system of its own. Every mod goes through SMF, and SMF's Deploy.exe builds the game's patch files."
+    }
+  },
+  "installed": 3,
+  "enabled": 1,
+  "withProblems": 0,
+  "notes": [],
+  "deploy": {
+    "upToDate": false,
+    "lastSuccess": null,
+    "lastAtMs": null,
+    "busy": null
+  },
+  "setups": [],
+  "passActive": false
+}

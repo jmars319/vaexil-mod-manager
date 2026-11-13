@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "codes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ErrorCodeInfo"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "codes"
+  ],
+  "title": "ErrorCodeList",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ErrorCodeInfo": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "meaning": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "code",
+        "meaning",
+        "hint",
+        "retryable",
+        "exitCode"
+      ],
+      "description": "One entry of the list of error codes."
+    }
+  }
+}

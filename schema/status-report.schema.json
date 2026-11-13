@@ -1,0 +1,302 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "appVersion": {
+      "type": "string"
+    },
+    "game": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GameView"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "backend": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackendView"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "installed": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "enabled": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "withProblems": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0,
+      "description": "Mods whose description can't be read."
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Problems worth knowing that don't stop the framework working."
+    },
+    "deploy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeployState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "setups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Saved setups, by name."
+    },
+    "passActive": {
+      "type": "boolean",
+      "description": "Whether a compatibility pass is under way."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "appVersion",
+    "installed",
+    "enabled",
+    "withProblems",
+    "notes",
+    "setups",
+    "passActive"
+  ],
+  "title": "StatusReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "GameView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id for the game, such as `hitman-woa`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "store": {
+          "type": "string",
+          "description": "Where it was found: Steam, Epic Games, Microsoft Store or Folder."
+        },
+        "folder": {
+          "type": "string",
+          "description": "The game folder."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "store",
+        "folder"
+      ],
+      "description": "A game install VMM found."
+    },
+    "BackendView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id, such as `smf`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/BackendState"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The framework's version, when it is one this build knows."
+        },
+        "unknownVersionSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For a version this build doesn't know: the hash that identifies it."
+        },
+        "folder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "problem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the framework can't be used, when `state` is `unreadable`."
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "nativeMods": {
+          "$ref": "#/$defs/NativeMods"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "capabilities",
+        "nativeMods"
+      ]
+    },
+    "BackendState": {
+      "type": "string",
+      "enum": [
+        "installed",
+        "not_installed",
+        "unreadable"
+      ],
+      "description": "Whether the mod framework is there and readable."
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The load orders the backend keeps, such as `[\"smf\"]`."
+        },
+        "options": {
+          "type": "boolean",
+          "description": "Whether mods can have options."
+        },
+        "deploy": {
+          "$ref": "#/$defs/DeployMethod"
+        },
+        "needsDeploy": {
+          "type": "boolean",
+          "description": "Whether a change reaches the game only after a deploy."
+        }
+      },
+      "required": [
+        "orders",
+        "options",
+        "deploy",
+        "needsDeploy"
+      ]
+    },
+    "DeployMethod": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "external_tool",
+          "description": "The framework's own tool builds the game's files (SMF's `Deploy.exe`)."
+        },
+        {
+          "type": "string",
+          "const": "place_files",
+          "description": "VMM places the files itself."
+        }
+      ],
+      "description": "How changes reach the game."
+    },
+    "NativeMods": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/NativeModsStatus"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "explanation"
+      ],
+      "description": "How VMM lives alongside the game's own mod system (ADR 0003, section 5)."
+    },
+    "NativeModsStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "none",
+          "description": "The game has no mod system of its own."
+        },
+        {
+          "type": "string",
+          "const": "coexists",
+          "description": "VMM shows the game's own mods read-only and works around them."
+        },
+        {
+          "type": "string",
+          "const": "coexists-with-limits",
+          "description": "As `coexists`, with the limits given in the explanation."
+        },
+        {
+          "type": "string",
+          "const": "unsupported",
+          "description": "VMM can't work safely alongside the game's own mods."
+        }
+      ]
+    },
+    "DeployState": {
+      "type": "object",
+      "properties": {
+        "upToDate": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the last successful deploy was of exactly the current mods and\nsettings. Absent when that can't be worked out."
+        },
+        "lastSuccess": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the last deploy succeeded. Absent when there has been none."
+        },
+        "lastAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "When the last deploy finished, in milliseconds since 1970 (UTC)."
+        },
+        "busy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Whether a deploy, or the game, is running now."
+        }
+      },
+      "description": "When the game last got the current mods."
+    }
+  }
+}

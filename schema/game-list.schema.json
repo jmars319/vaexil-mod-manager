@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "games": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GameView"
+      },
+      "description": "Every install found. Commands act on the first one unless `--game`\nnames another."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "games"
+  ],
+  "title": "GameList",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "GameView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id for the game, such as `hitman-woa`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "store": {
+          "type": "string",
+          "description": "Where it was found: Steam, Epic Games, Microsoft Store or Folder."
+        },
+        "folder": {
+          "type": "string",
+          "description": "The game folder."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "store",
+        "folder"
+      ],
+      "description": "A game install VMM found."
+    }
+  }
+}

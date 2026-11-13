@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "mod.not_found",
+    "message": "No installed mod has the id “Z”.",
+    "hint": "List the mods and use an id from that list.",
+    "retryable": false,
+    "exitCode": 3
+  }
+}

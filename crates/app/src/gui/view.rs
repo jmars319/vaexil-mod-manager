@@ -199,8 +199,20 @@ mod tests {
     struct Fake(Inspection);
 
     impl Backend for Fake {
+        fn id(&self) -> &'static str {
+            "smf"
+        }
         fn name(&self) -> &'static str {
             "Simple Mod Framework"
+        }
+        fn capabilities(&self) -> vmm_core::schema::Capabilities {
+            unreachable!("the view doesn't show capabilities")
+        }
+        fn native_mods(&self) -> vmm_core::schema::NativeMods {
+            unreachable!("the view doesn't show native mods")
+        }
+        fn state_files(&self, _: &GameInstall) -> Vec<PathBuf> {
+            unreachable!("the view never plans")
         }
         fn inspect(&self, _: &GameInstall) -> Inspection {
             self.0.clone()

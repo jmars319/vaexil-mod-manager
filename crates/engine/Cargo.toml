@@ -12,6 +12,7 @@ publish.workspace = true
 vmm-core.workspace = true
 vmm-backend-smf.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

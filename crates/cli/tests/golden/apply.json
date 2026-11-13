@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "steps": [
+    {
+      "description": "Turn “B mod” (B) on",
+      "changesSomething": true
+    },
+    {
+      "description": "Turn “C mod” (C) on",
+      "changesSomething": true
+    }
+  ],
+  "needsDeploy": true
+}

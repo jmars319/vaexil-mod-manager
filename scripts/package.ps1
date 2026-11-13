@@ -1,4 +1,4 @@
-# Builds Vaexil Mod Manager and produces, in dist/:
+# Builds Vaexil Mod Manager (the window and vmm.exe) and produces, in dist/:
 #   VaexilModManager-<version>-portable.zip
 #   VaexilModManager-<version>-setup.exe   (when Inno Setup 6 is installed)
 #   SHA256SUMS.txt
@@ -14,13 +14,15 @@ $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).pack
     Where-Object name -eq 'vaexil-mod-manager' | Select-Object -ExpandProperty version
 
 if (-not $SkipBuild) {
-    cargo build --release --locked -p vaexil-mod-manager
+    cargo build --release --locked -p vaexil-mod-manager -p vmm-cli
     if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 }
 
 if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Force $staging | Out-Null
 Copy-Item (Join-Path $root 'target\release\vaexil-mod-manager.exe') $staging
+# The command line, beside the app (ADR 0003). Settings can put this folder on PATH.
+Copy-Item (Join-Path $root 'target\release\vmm.exe') $staging
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $staging 'LICENSE.txt')
 Copy-Item (Join-Path $root 'README.md') $staging
 
@@ -63,7 +65,7 @@ Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
 # Verify the archive holds exactly what is expected and nothing private.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $entries = [System.IO.Compression.ZipFile]::OpenRead($zip).Entries | ForEach-Object FullName
-$expected = 'LICENSE.txt', 'README.md', 'THIRD-PARTY-LICENSES.txt', 'vaexil-mod-manager.exe'
+$expected = 'LICENSE.txt', 'README.md', 'THIRD-PARTY-LICENSES.txt', 'vaexil-mod-manager.exe', 'vmm.exe'
 if (Compare-Object ($entries | Sort-Object) ($expected | Sort-Object)) {
     throw "Unexpected zip contents: $($entries -join ', ')"
 }

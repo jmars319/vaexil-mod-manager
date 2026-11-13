@@ -1,0 +1,220 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "game": {
+      "$ref": "#/$defs/GameView"
+    },
+    "mod": {
+      "$ref": "#/$defs/ModView"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "game",
+    "mod"
+  ],
+  "title": "ModDetail",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "GameView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id for the game, such as `hitman-woa`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "store": {
+          "type": "string",
+          "description": "Where it was found: Steam, Epic Games, Microsoft Store or Folder."
+        },
+        "folder": {
+          "type": "string",
+          "description": "The game folder."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "store",
+        "folder"
+      ],
+      "description": "A game install VMM found."
+    },
+    "ModView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "$ref": "#/$defs/ModKind",
+          "description": "What the mod mostly changes. Information only: it never changes what loads."
+        },
+        "kindSource": {
+          "$ref": "#/$defs/KindSource"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0,
+          "description": "1-based place in the load order; absent when the mod is off."
+        },
+        "badge": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A short framework-specific label, such as `RPKG`."
+        },
+        "problem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the mod's own description can't be read. Such a mod can't be turned on."
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OptionView"
+          }
+        },
+        "loadBefore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mods the author says this one must load before."
+        },
+        "loadAfter": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mods the author says this one must load after."
+        },
+        "replacedBy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Enabled mods later in the order that replace a file this one also\nreplaces, so their copy is used."
+        },
+        "folder": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "authors",
+        "kind",
+        "kindSource",
+        "enabled",
+        "options",
+        "loadBefore",
+        "loadAfter",
+        "replacedBy",
+        "folder"
+      ]
+    },
+    "ModKind": {
+      "type": "string",
+      "enum": [
+        "gameplay",
+        "models-textures",
+        "sound",
+        "dialogue",
+        "ui",
+        "text",
+        "other"
+      ],
+      "description": "What a mod mostly changes, for grouping the Mods view. Information only:\nit never affects what the framework loads."
+    },
+    "KindSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "files",
+          "description": "Worked out from the mod's files."
+        },
+        {
+          "type": "string",
+          "const": "user",
+          "description": "Chosen by the user."
+        }
+      ],
+      "description": "Where a mod's type comes from."
+    },
+    "OptionView": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "What to pass in `setOptions.chosen` to choose this option."
+        },
+        "label": {
+          "type": "string"
+        },
+        "group": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Set when this is one choice of a group: exactly one of a group is chosen."
+        },
+        "tooltip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chosen": {
+          "type": "boolean"
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mods this option needs turned on that are off. It can't be chosen\nuntil they are on."
+        }
+      },
+      "required": [
+        "value",
+        "label",
+        "chosen",
+        "needs"
+      ]
+    }
+  }
+}

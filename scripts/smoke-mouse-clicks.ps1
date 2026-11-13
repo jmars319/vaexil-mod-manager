@@ -14,7 +14,8 @@
 # stand-in Deploy.exe (the fake-deploy example, built first) and must end up
 # to date with a log; a later change must show as changes since the deploy.
 # A setup can be saved, and a compatibility pass can start with every mod
-# off, try a batch and turn it off again.
+# off, try a batch and turn it off again. Settings' "Add the command line to
+# my PATH" must first show what it would change; the test cancels it.
 #
 #   ./scripts/smoke-mouse-clicks.ps1 [-Exe target\release\vaexil-mod-manager.exe]
 param([string] $Exe = (Join-Path $PSScriptRoot '..\target\release\vaexil-mod-manager.exe'))
@@ -274,6 +275,23 @@ try {
     Start-Sleep -Milliseconds 600
     Check 'pass: ending keeps the mods as they are' ((& $order) -eq '' -and -not ((Get-Content $setupsFile -Raw) -match '"pass"'))
     Click $window (Find-Control $window 'Back to mods')
+    Start-Sleep -Milliseconds 400
+
+    # Settings: "Add the command line to my PATH" only shows what it would
+    # change. This test never presses the confirming "Add to PATH", which
+    # would change the real user PATH.
+    Click $window (Find-Control $window 'Settings')
+    $add = Find-Control $window 'Add the command line to my PATH'
+    if ($add) {
+        Click $window $add
+        Check 'settings: Add first shows what it will change' ([bool](Find-Control $window 'Add to PATH'))
+        Click $window (Find-Control $window 'Cancel adding to PATH')
+        Start-Sleep -Milliseconds 400
+        Check 'settings: Cancel changes nothing' ([bool](Find-Control $window 'Add the command line to my PATH'))
+    } else {
+        Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Find-Control $window 'Take the command line out of my PATH'))
+    }
+    Click $window (Find-Control $window 'Close settings')
     Start-Sleep -Milliseconds 400
 } finally {
     if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }

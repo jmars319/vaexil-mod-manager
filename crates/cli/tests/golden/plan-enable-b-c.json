@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "planId": "<planId>",
+  "game": "<tmp>/game",
+  "changes": [
+    {
+      "op": "setEnabled",
+      "mod": "B",
+      "enabled": true
+    },
+    {
+      "op": "setEnabled",
+      "mod": "C",
+      "enabled": true
+    }
+  ],
+  "steps": [
+    {
+      "description": "Turn “B mod” (B) on",
+      "changesSomething": true
+    },
+    {
+      "description": "Turn “C mod” (C) on",
+      "changesSomething": true
+    }
+  ],
+  "preconditions": [
+    {
+      "path": "<tmp>/game/Simple Mod Framework/config.json",
+      "sha256": "<sha256>"
+    }
+  ],
+  "createdAtMs": "<createdAtMs>",
+  "expiresAtMs": "<expiresAtMs>"
+}
