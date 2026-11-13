@@ -15,7 +15,8 @@
 # to date with a log; a later change must show as changes since the deploy.
 # A setup can be saved, and a compatibility pass can start with every mod
 # off, try a batch and turn it off again. Settings' "Add the command line to
-# my PATH" must first show what it would change; the test cancels it.
+# my PATH" must first show what it would change; the test leaves without
+# confirming and checks the user PATH did not change.
 #
 #   ./scripts/smoke-mouse-clicks.ps1 [-Exe target\release\vaexil-mod-manager.exe]
 param([string] $Exe = (Join-Path $PSScriptRoot '..\target\release\vaexil-mod-manager.exe'))
@@ -280,14 +281,19 @@ try {
     # Settings: "Add the command line to my PATH" only shows what it would
     # change. This test never presses the confirming "Add to PATH", which
     # would change the real user PATH.
+    # The test leaves the confirmation by Close, far from "Add to PATH", not
+    # by the Cancel button beside it, and checks the user PATH is unchanged.
+    $pathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
     Click $window (Find-Control $window 'Settings')
     $add = Find-Control $window 'Add the command line to my PATH'
     if ($add) {
         Click $window $add
         Check 'settings: Add first shows what it will change' ([bool](Find-Control $window 'Add to PATH'))
-        Click $window (Find-Control $window 'Cancel adding to PATH')
-        Start-Sleep -Milliseconds 400
-        Check 'settings: Cancel changes nothing' ([bool](Find-Control $window 'Add the command line to my PATH'))
+        Click $window (Find-Control $window 'Close settings')
+        Start-Sleep -Milliseconds 500
+        Click $window (Find-Control $window 'Settings')
+        Start-Sleep -Milliseconds 500
+        Check 'settings: leaving without confirming changes nothing' ([bool](Find-Control $window 'Add the command line to my PATH') -and [Environment]::GetEnvironmentVariable('Path', 'User') -eq $pathBefore)
     } else {
         Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Find-Control $window 'Take the command line out of my PATH'))
     }
