@@ -78,6 +78,7 @@ pub fn run() -> i32 {
         setups: RefCell::new(setups),
         pass_candidates: RefCell::default(),
         pass_picked: RefCell::default(),
+        fingerprint: RefCell::default(),
     });
     g.set_order_rows(ModelRc::from(state.order_rows.clone()));
     let es = ui.global::<EditState>();
@@ -164,6 +165,8 @@ struct State {
     pass_candidates: RefCell<Vec<String>>,
     /// The candidates ticked for the next batch.
     pass_picked: RefCell<Vec<String>>,
+    /// The status line's last fingerprint: when, under which quick key, and the value.
+    fingerprint: RefCell<Option<(std::time::Instant, String, String)>>,
 }
 
 /// The Load order view: moves and Auto-sort change a draft; Save writes it.

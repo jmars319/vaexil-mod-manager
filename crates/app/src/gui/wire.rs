@@ -28,6 +28,8 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
             let Some(ui) = weak.upgrade() else { return };
             let Some(game) = state.game.borrow().clone() else { return };
             let current = state.smf.deploy_fingerprint(&game).ok();
+            // The status line takes its own next time.
+            *state.fingerprint.borrow_mut() = None;
             if current.is_some() && current == state.record.borrow().fingerprint {
                 note(&state, play::launch(&game).err());
                 refresh(&ui, &state);
@@ -72,6 +74,8 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
                 let _ = record.save(dir);
             }
             *state.record.borrow_mut() = record;
+            // Look again after a deploy, rather than trust a cached one.
+            *state.fingerprint.borrow_mut() = None;
             let problem = match &f.result {
                 Err(e) => Some(format!("Couldn't run SMF's Deploy.exe. {e}")),
                 Ok(_) if !success => None,
@@ -303,7 +307,25 @@ pub fn wire_pass(ui: &AppWindow, state: &Rc<State>) {
 pub fn refresh_extras(ui: &AppWindow, state: &State) {
     let g = ui.global::<Ui>();
     let game = state.game.borrow().clone();
-    let current = game.as_ref().and_then(|g| state.smf.deploy_fingerprint(g).ok());
+    // A full fingerprint walks every mod's files, so the status line reuses
+    // one while a cheap check (config.json and the top of Mods) is unchanged,
+    // for up to 30 seconds. Play and Deploy always take a fresh one.
+    let current = {
+        let quick = game
+            .as_ref()
+            .and_then(|g| vmm_core::smf::find_folder(&g.root))
+            .map(|f| vmm_core::smf::deploy::quick_key(&f))
+            .unwrap_or_default();
+        let mut cached = state.fingerprint.borrow_mut();
+        let fresh = cached.as_ref().is_some_and(|(at, key, _)| *key == quick && at.elapsed() < Duration::from_secs(30));
+        if !fresh {
+            *cached = game
+                .as_ref()
+                .and_then(|g| state.smf.deploy_fingerprint(g).ok())
+                .map(|f| (std::time::Instant::now(), quick.clone(), f));
+        }
+        cached.as_ref().map(|(_, _, f)| f.clone())
+    };
     let (running, last) = {
         let p = state.deploy.lock().expect("deploy progress lock");
         (p.running, p.last_line.clone())

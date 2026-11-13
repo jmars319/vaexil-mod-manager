@@ -83,34 +83,72 @@ pub fn strip_ansi(text: &str) -> String {
     out
 }
 
-/// A hash of everything a deploy reads that this app can change or see
-/// change: `config.json`, and each mod folder's name, its manifest's time
-/// and its own time. Equal fingerprints mean nothing changed since.
+/// A cheap check for [`fingerprint`]'s cache: `config.json`'s bytes and the
+/// top level of `Mods` (names and times). It changes with anything the app
+/// itself writes, and with mods being added or removed, but not with a file
+/// changed deep inside a mod.
+pub fn quick_key(smf_folder: &Path) -> String {
+    let mut h = Sha256::new();
+    h.update(std::fs::read(smf_folder.join("config.json")).unwrap_or_default());
+    let mut top: Vec<String> = std::fs::read_dir(smf_folder.join("Mods"))
+        .map(|list| {
+            list.flatten()
+                .map(|e| {
+                    let time = e
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |d| d.as_nanos());
+                    format!("{}\0{time}", e.file_name().to_string_lossy())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    top.sort();
+    for t in top {
+        h.update(t.as_bytes());
+        h.update(b"\n");
+    }
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A hash of everything a deploy reads: `config.json`'s bytes, and every
+/// file under `Mods` by path, size and modified time, so a file changed or
+/// replaced deep inside a mod counts. Equal fingerprints mean nothing changed
+/// since. Walking every mod takes about a tenth of a second on JASON-PC.
 pub fn fingerprint(smf_folder: &Path) -> Result<String, String> {
     let mut h = Sha256::new();
     let config = smf_folder.join("config.json");
     h.update(std::fs::read(&config).map_err(|e| format!("Could not read {}: {e}", config.display()))?);
     let mods = smf_folder.join("Mods");
-    let mut entries: Vec<(String, String)> = std::fs::read_dir(&mods)
-        .map_err(|e| format!("Could not read {}: {e}", mods.display()))?
-        .flatten()
-        .map(|e| {
-            let p = e.path();
-            let time = |q: &Path| {
-                std::fs::metadata(q)
-                    .and_then(|m| m.modified())
+    if !mods.is_dir() {
+        return Err(format!("Could not read {}: it is not a folder", mods.display()));
+    }
+    let mut entries: Vec<String> = Vec::new();
+    let mut stack = vec![mods.clone()];
+    while let Some(dir) = stack.pop() {
+        let list = std::fs::read_dir(&dir).map_err(|e| format!("Could not read {}: {e}", dir.display()))?;
+        for e in list.flatten() {
+            let path = e.path();
+            let rel = path.strip_prefix(&mods).unwrap_or(&path).to_string_lossy().into_owned();
+            let Ok(meta) = e.metadata() else { continue };
+            if meta.is_dir() {
+                entries.push(format!("{rel}/"));
+                stack.push(path);
+            } else {
+                let time = meta
+                    .modified()
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map_or(0, |d| d.as_nanos())
-            };
-            (e.file_name().to_string_lossy().into_owned(), format!("{}:{}", time(&p), time(&p.join("manifest.json"))))
-        })
-        .collect();
+                    .map_or(0, |d| d.as_nanos());
+                entries.push(format!("{rel}\0{}\0{time}", meta.len()));
+            }
+        }
+    }
     entries.sort();
-    for (name, times) in entries {
-        h.update(name.as_bytes());
-        h.update(b"\0");
-        h.update(times.as_bytes());
+    for e in entries {
+        h.update(e.as_bytes());
         h.update(b"\n");
     }
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
@@ -154,6 +192,16 @@ mod tests {
         let b = fingerprint(tmp.path()).unwrap();
         assert_ne!(a, b);
         std::fs::create_dir_all(tmp.path().join("Mods/B")).unwrap();
-        assert_ne!(b, fingerprint(tmp.path()).unwrap());
+        let c = fingerprint(tmp.path()).unwrap();
+        assert_ne!(b, c);
+        // A file changed deep inside a mod counts, even when no folder's own
+        // time moves.
+        let deep = tmp.path().join("Mods/A/content/chunk0/00AA00AA00AA00AA.TEMP");
+        std::fs::create_dir_all(deep.parent().unwrap()).unwrap();
+        std::fs::write(&deep, b"one").unwrap();
+        let d = fingerprint(tmp.path()).unwrap();
+        assert_ne!(c, d);
+        std::fs::write(&deep, b"two!").unwrap();
+        assert_ne!(d, fingerprint(tmp.path()).unwrap());
     }
 }

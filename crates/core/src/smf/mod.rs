@@ -134,8 +134,22 @@ impl Framework for Smf {
         let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
         let installed = |id: &String| mods.iter().any(|m| m.id == *id && m.problem.is_none());
         let (order, skipped): (Vec<String>, Vec<String>) = setup.order.iter().cloned().partition(|id| installed(id));
-        let options: BTreeMap<String, Vec<String>> =
+        let mut options: BTreeMap<String, Vec<String>> =
             setup.options.iter().filter(|(id, _)| order.contains(id)).map(|(k, v)| (k.clone(), v.clone())).collect();
+        // A mod that has never had options chosen gets its author's defaults,
+        // as turning it on with its switch does: Deploy.exe applies no
+        // options at all for a mod without an entry.
+        let config = read_config(&folder)?;
+        for m in mods.iter().filter(|m| order.contains(&m.id) && m.badge.as_deref() != Some("RPKG")) {
+            if options.contains_key(&m.id) || config.options_of(&m.id).is_some() {
+                continue;
+            }
+            if let Ok(manifest) = read_manifest(&m.folder.join("manifest.json"))
+                && !manifest.options.is_empty()
+            {
+                options.insert(m.id.clone(), options::default_values(&manifest.options, &order));
+            }
+        }
         write::update(&folder, self.backup_dir.as_deref(), |c| write::apply_setup(c, &order, &options))?;
         Ok(skipped)
     }
@@ -832,6 +846,30 @@ mod tests {
 
         smf.apply_setup(&game, &saved).unwrap();
         assert_eq!(smf.current_setup(&game).unwrap().order, saved.order);
+    }
+
+    #[test]
+    fn a_setup_gives_a_mod_without_options_its_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        let smf_folder = fake_install(tmp.path(), b"deploy");
+        std::fs::write(
+            smf_folder.join("Mods/Accent Overhaul/manifest.json"),
+            "{ id: 'Someone.Accents', name: 'Accent Overhaul', options: [\
+             { name: 'Loud', type: 'checkbox', enabledByDefault: true },\
+             { name: 'With AI', type: 'checkbox', enabledByDefault: true, requirements: ['Atampy26.RealisticAI'] }] }",
+        )
+        .unwrap();
+        let game = GameInstall { store: Store::Folder, root: tmp.path().to_path_buf() };
+        let smf = Smf::default();
+        let order =
+            |ids: &[&str]| Setup { order: ids.iter().map(|s| s.to_string()).collect(), options: BTreeMap::new() };
+        smf.apply_setup(&game, &order(&["Someone.Accents"])).unwrap();
+        assert_eq!(smf.current_setup(&game).unwrap().options.get("Someone.Accents"), Some(&vec!["Loud".to_string()]));
+
+        // A mod whose options were already chosen keeps them.
+        assert!(smf.set_options(&game, "Someone.Accents", &[]).unwrap());
+        smf.apply_setup(&game, &order(&["Atampy26.RealisticAI", "Someone.Accents"])).unwrap();
+        assert_eq!(smf.current_setup(&game).unwrap().options.get("Someone.Accents"), Some(&vec![]));
     }
 
     #[test]
