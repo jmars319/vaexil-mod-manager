@@ -1,7 +1,7 @@
 # ADR 0003: A headless engine, game backends and interfaces any LLM can use
 
 Date: 2026-11-13
-Status: proposed (the owner's open decisions are at the end)
+Status: accepted 2026-11-13, with the owner's decisions recorded at the end. They change sections 5, 6 and 7 and the sequence.
 
 ## Context
 
@@ -126,9 +126,44 @@ pub trait Backend {
 
 - Every rule in `docs/safety-model.md` holds for every front end, enforced in the engine and not in the window: SMF stays untouched, a backup comes before each write, and nothing deploys while the game runs.
 - AI clients get the same operations as the window and nothing more: no raw file access and no arbitrary commands.
-- Changes need an explicit step. The CLI needs `--yes`, and MCP write tools are marked destructive so clients ask the user first. A Settings switch, "Let AI tools make changes", can turn every MCP write tool off.
+- **AI tools are read-only until the user asks for a change.** An AI may read anything, at any time. It changes something only when the user has asked for that change in so many words, such as "start with all mods disabled".
+  - Write tools are marked destructive and need a `planId`, so the client shows the plan and asks before it runs.
+  - The server's instructions to the model say not to change anything on its own initiative.
+  - A Settings switch, "Let AI tools make changes", turns every write tool off.
+  - The journal records every change an AI made and the request it was made for.
+- The CLI needs `--yes` for any change.
+- **Native mods.** Several games have their own mod systems: REDmod in Cyberpunk 2077, Creations in Skyrim and Fallout 4. VMM never moves, changes or deletes a file it did not place itself. Each backend states how it lives alongside the game's own mods, as `nativeMods: { status, explanation }`, where `status` is one of:
+  - `none`: the game has no native mods (HITMAN);
+  - `coexists`: VMM shows native mods read-only and works around them;
+  - `coexists-with-limits`: the limits are spelled out, for example "VMM cannot order native mods against its own";
+  - `unsupported`: VMM cannot work safely alongside them, and says so before you start, so you can decide whether to avoid native mods in that game.
 
-### 6. How it is checked
+  The window, the CLI and MCP all show this statement.
+
+### 6. How mods reach the game, for any game and any framework
+
+The goal is the method that works with the most games, launchers and frameworks, with nothing it cannot undo:
+
+- **Deploy by hard links from a staging folder,** with a copy fallback when staging and the game are on different drives. A **ledger** records every file VMM placed, with its hash and where it came from.
+  - A file that was already there (the game's own file, or a native or hand-installed mod) is backed up before VMM replaces it, and is put back when VMM removes its own file.
+  - **Purge** returns the game folder exactly to its state before VMM.
+  - **Verify** reports any file that has changed since it was placed.
+- **No DLL injection and no virtual file system** for VMM's own deploys. A hooking VFS like MO2's usvfs works only for programs started through it. It must hook every file call the game makes, which some launchers, anti-cheat systems and tools that compile mods at deploy time (REDmod, SMF's `Deploy.exe`) do not tolerate. Real files work for every program.
+- **Frameworks that build their own output** (SMF, REDmod) run as an external-tool step after the files are placed. Their output stays theirs.
+- **An `mo2` backend** drives an existing Mod Organizer 2 instance as it is (profiles, load order, launching), as Modlist Launcher does now. That keeps Wabbajack modlists and other MO2-built setups working unchanged, and is how Modlist Launcher can later be absorbed into VMM.
+
+### 7. Compatibility passes after a game update
+
+The owner's workflow after a major game update (used for Cyberpunk 2.5) becomes a feature of the engine, and so is usable from the window, the CLI and AI tools:
+
+1. **Start from a known-good baseline.** Native mods, or nothing, with every managed mod off.
+2. **Add mods in small, themed batches,** chosen after checking compatibility and dependencies.
+3. **Test each batch:** launch, compile (where the framework compiles), check the logs, play.
+4. **Record the result.** A good batch joins the next baseline. A bad batch is turned off in one step, without touching the known-good profile or any save.
+
+The engine keeps each pass as a profile history: the baseline, each batch, its notes and its test result. A backend may add checks of its own, such as SMF's deploy log or Cyberpunk's REDmod compile log. VMM never changes save games.
+
+### 8. How it is checked
 
 - Golden JSON fixtures for every CLI command, run against fake game folders (`VAEXIL_MOD_MANAGER_GAME` and `VAEXIL_MOD_MANAGER_DATA`).
 - An integration test starts `vmm mcp`, lists its tools, and calls each one over stdio.
@@ -137,7 +172,7 @@ pub trait Backend {
 
 ## Sequence
 
-This work comes before the rest of stage 02, so that the load order, setups and deploy are built engine-first and reach the window, the CLI and MCP in the same PR.
+The owner chose (2026-11-13) to finish the SMF part of the app first, as it is built today. That is the rest of stage 02: the load order view, then setups with compatibility passes (section 7), Play and Deploy. Then come the steps below, in this order.
 
 1. **Engine extraction.**
    - Create `vmm-engine` and move `smf` into `vmm-backend-smf`.
@@ -147,14 +182,14 @@ This work comes before the rest of stage 02, so that the load order, setups and 
 2. **Schema and CLI.**
    - Schema types, JSON Schema files and the CI diff.
    - `vmm.exe` with the read commands, and plan and apply for on/off, options and type.
-   - The installer puts `vmm.exe` beside the app and on the user's PATH.
+   - `vmm.exe` ships beside the app. Settings in the window has "Add the command line to my PATH" and "Connect an AI app" (Claude Code, Gemini CLI, Codex CLI), which writes that app's MCP entry after showing exactly what it will add. Nothing is changed outside VMM except from the window.
 3. **MCP server.**
    - `vmm mcp` with the read tools and `plan_change`/`apply_plan`.
    - `docs/ai.md` with setup for Claude Code, Gemini CLI and Codex CLI.
-   - The Settings switch.
+   - The Settings switch for AI changes, and the read-only rule in the server's instructions.
 4. **Logs and diagnosis.** JSON logs, `diagnose`, the crash hook.
-5. **Stage 02 continues engine-first:** the load order view with Auto-sort and conflicts, then setups, Play and Deploy, with deploy as a job.
-6. **A second backend (Cyberpunk 2077),** after the first release, once the decisions below are made.
+5. **The SMF features built so far move onto the engine,** with each one reaching the CLI and MCP.
+6. **The deploy engine (section 6),** then the `mo2` backend and a Cyberpunk 2077 backend.
 
 ## Consequences
 
@@ -163,14 +198,12 @@ This work comes before the rest of stage 02, so that the load order, setups and 
 - The JSON schema becomes a public contract. Changing it means a version bump and updated fixtures.
 - Deploys can be started and watched by an AI, and the journal records every change and who made it.
 
-## Open decisions for the owner
+## The owner's decisions (2026-11-13)
 
-1. **Order of work.** Default: the headless steps 1 to 4 come before the load order view, as above.
-2. **What AI tools may change.** Default:
-   - reading is always allowed;
-   - changes go through plan and apply and are marked destructive, so the client asks you;
-   - deploys are allowed;
-   - a Settings switch turns all AI changes off, and it starts on.
-3. **The CLI on PATH.** Default: the installer adds `vmm.exe` to your user PATH, so any agent can find it.
-4. **How Cyberpunk mods reach the game,** decided before that backend starts. Default: hardlinks from a staging folder, with a ledger and backups so everything can be undone, as Vortex does. Not a virtual file system like MO2's usvfs.
-5. **Records.** Once accepted: a decision-log entry and updated registry wording in agentic-instructions (product scope: a multi-game, AI-operable mod manager).
+1. **Order of work.** Finish the SMF part first, then the steps above in that order.
+2. **What AI tools may change.** Nothing, until the user asks for a specific change. The compatibility-pass workflow in section 7 is the main reason to let an AI make changes at all.
+3. **Setup outside VMM.** Whatever is needed (the CLI on PATH, registering the MCP server with AI apps) is done from the window's Settings, not silently by the installer.
+4. **How mods reach the game.** The most robust and secure method that works with the most games and frameworks (section 6). MO2's way is fine where an MO2 setup already exists, through the `mo2` backend. Modlist Launcher is a tool for now and may be absorbed into VMM later.
+5. **Records.** A decision-log entry and registry wording in agentic-instructions.
+
+Also from the owner: VMM must work alongside a game's native mods where it can, and say so explicitly where it can't (section 5, `nativeMods`).
