@@ -108,9 +108,43 @@ pub fn running(names: &[&str]) -> Vec<String> {
     found
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+    #[test]
+    fn run_command_waits_and_returns_the_exit_code() {
+        let cmd = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
+        let code = super::run_command(&[cmd, "/c".into(), "exit".into(), "3".into()]).unwrap();
+        assert_eq!(code, 3);
+        assert!(super::run_command(&[]).is_err());
+    }
+}
+
 #[cfg(not(windows))]
 pub fn running(_names: &[&str]) -> Vec<String> {
     Vec::new()
+}
+
+/// Runs the game's own command, as Steam passes it in `%command%`, from its
+/// folder, and waits for it to end, so Steam sees the game running for as
+/// long as it does. Returns its exit code.
+pub fn run_command(command: &[String]) -> Result<i32, VmmError> {
+    let program = command.first().ok_or_else(|| {
+        VmmError::new(ErrorCode::LaunchUnsupported, "Steam didn't pass the game's command (%command%).")
+    })?;
+    let program = PathBuf::from(program);
+    let cwd = program.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let mut child = std::process::Command::new(&program)
+        .args(&command[1..])
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            VmmError::new(ErrorCode::LaunchUnsupported, format!("Couldn't start {}: {e}", program.display()))
+        })?;
+    let status = child.wait().map_err(|e| VmmError::new(ErrorCode::Io, format!("Lost track of the game: {e}")))?;
+    Ok(status.code().unwrap_or(0))
 }
 
 /// Opens a link or a file with what Windows has registered for it, such as

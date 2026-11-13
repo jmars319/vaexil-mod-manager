@@ -1,0 +1,131 @@
+// Play when the mods changed since the last deploy: deploy first, or play
+// the build already in the game. Shown in the main window, and on its own
+// when Steam's Play button starts the app.
+import { Button, ButtonRow, Sheet, Theme } from "theme.slint";
+
+export global PlayState {
+    // Why the choice is offered.
+    in property <string> reason;
+    callback deploy-then-play();
+    callback play-now();
+    callback cancel();
+}
+
+export component PlaySheet inherits Sheet {
+    title: "Play HITMAN";
+    subtitle: PlayState.reason;
+    panel-width: 520px;
+    close => { PlayState.cancel(); }
+
+    ButtonRow {
+        Button {
+            text: "Cancel";
+            accessible-label: "Cancel playing";
+            clicked => { PlayState.cancel(); }
+        }
+        Button {
+            text: "Play the last deployed build";
+            clicked => { PlayState.play-now(); }
+        }
+        Button {
+            text: "Deploy, then play";
+            primary: true;
+            clicked => { PlayState.deploy-then-play(); }
+        }
+    }
+}
+
+/// The same choice as its own small window, for Steam's Play button.
+export component PlayChooser inherits Window {
+    in property <string> reason;
+    in property <bool> can-deploy: true;
+    callback deploy-then-play();
+    callback play-now();
+    callback cancel();
+
+    title: "Vaexil Mod Manager";
+    icon: @image-url("../../../assets/icon-256.png");
+    width: 520px;
+    background: Theme.surface;
+    default-font-size: 13px;
+    default-font-family: Theme.font-sans;
+    forward-focus: scope;
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            Text {
+                text: "Play HITMAN";
+                font-size: 18px;
+                font-weight: 700;
+                color: Theme.text;
+            }
+            Text {
+                text: root.reason;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            ButtonRow {
+                Button {
+                    text: "Cancel";
+                    accessible-label: "Cancel playing";
+                    clicked => { root.cancel(); }
+                }
+                Button {
+                    text: "Play the last deployed build";
+                    clicked => { root.play-now(); }
+                }
+                if root.can-deploy: Button {
+                    text: "Deploy, then play";
+                    primary: true;
+                    clicked => { root.deploy-then-play(); }
+                }
+            }
+        }
+    }
+}
+
+/// A deploy started from Steam's Play button, shown until it ends.
+export component DeployWindow inherits Window {
+    in property <string> line;
+
+    title: "Vaexil Mod Manager: deploying";
+    icon: @image-url("../../../assets/icon-256.png");
+    width: 520px;
+    background: Theme.surface;
+    default-font-size: 13px;
+    default-font-family: Theme.font-sans;
+
+    VerticalLayout {
+        padding: 22px;
+        spacing: 10px;
+        Text {
+            text: "Deploying your mods, then HITMAN starts";
+            font-size: 18px;
+            font-weight: 700;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: "SMF's Deploy.exe is putting the mods into the game. This can take several minutes.";
+            color: Theme.secondary-text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.line;
+            font-family: Theme.font-mono;
+            font-size: 12px;
+            color: Theme.secondary-text;
+            overflow: elide;
+            accessible-label: "Deploy progress: " + root.line;
+        }
+    }
+}

@@ -67,6 +67,10 @@ Changing (plan first, then apply the plan):
   vmm apply <plan-id> --yes     apply a plan, once, within 10 minutes
   vmm deploy --yes              run SMF's Deploy.exe and wait for it, then
                                 show its report (refused while the game runs)
+  vmm play                      start HITMAN when the game has your mods; with
+                                changes since the last deploy, choose:
+  vmm play --deploy --yes       deploy first, then start it
+  vmm play --no-deploy          start the build already in the game
 
 For AI tools:
   vmm mcp                       an MCP server on stdin and stdout (docs/ai.md).
@@ -90,6 +94,8 @@ struct Args {
     limit: Option<usize>,
     name: Option<String>,
     from_current: bool,
+    /// `vmm play`: Some(true) deploy first, Some(false) play as is.
+    deploy: Option<bool>,
     words: Vec<String>,
 }
 
@@ -107,6 +113,7 @@ fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
         limit: None,
         name: None,
         from_current: false,
+        deploy: None,
         words: vec![],
     };
     let mut it = raw.into_iter();
@@ -137,6 +144,11 @@ fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
             "--file" => args.file = Some(value("--file")?),
             "--name" => args.name = Some(value("--name")?),
             "--from-current" => args.from_current = true,
+            "--deploy" | "--no-deploy" if args.deploy.is_some() => {
+                return Err(usage("Pass --deploy or --no-deploy, not both."));
+            }
+            "--deploy" => args.deploy = Some(true),
+            "--no-deploy" => args.deploy = Some(false),
             "--limit" => {
                 let v = value("--limit")?;
                 args.limit = Some(v.parse().map_err(|_| usage(format!("--limit needs a number, not {v}.")))?);
@@ -291,6 +303,57 @@ fn run(args: Args) -> Result<Out, VmmError> {
             let game = e.pick_game(args.game.as_deref()).ok();
             let list = e.setup_list(game.as_ref())?;
             Ok(out(&list, setups_text(&list)))
+        }
+        ["play"] => {
+            let e = engine();
+            let game = e.pick_game(args.game.as_deref())?;
+            let up_to_date = e.up_to_date(&game) == Some(true);
+            let deploy = match (up_to_date, args.deploy) {
+                (true, _) | (false, Some(false)) => false,
+                (false, Some(true)) => true,
+                (false, None) => {
+                    return Err(usage(
+                        "Your mods changed since the last deploy (or nothing has been deployed from Vaexil Mod \
+                         Manager yet). Run `vmm play --deploy --yes` to deploy first, or `vmm play --no-deploy` to \
+                         play the build already in the game.",
+                    ));
+                }
+            };
+            if deploy && !args.yes {
+                return Err(usage(
+                    "Deploying runs SMF's Deploy.exe, which rewrites the game's patch files. Run `vmm play --deploy \
+                     --yes` to confirm. Nothing was changed.",
+                ));
+            }
+            let mut report = None;
+            let mut text = String::new();
+            if deploy {
+                let show = !args.json;
+                let status = e.deploy_and_wait(&game, &mut |line| {
+                    if show && !line.is_empty() {
+                        eprintln!("{line}");
+                    }
+                })?;
+                let ok = status.report.as_ref().is_some_and(|r| r.result == schema::DeployResult::Succeeded);
+                text += &status.report.as_ref().map_or_else(String::new, report_text);
+                if !ok {
+                    // As `vmm deploy`: report, don't start, exit 6.
+                    let result = schema::PlayResult {
+                        schema_version: SCHEMA_VERSION,
+                        deployed: true,
+                        started: false,
+                        report: status.report,
+                    };
+                    text += "The game was not started.\n";
+                    let code = u8::try_from(ErrorCode::DeployFailed.exit_code()).unwrap_or(10);
+                    return Ok(Out { exit: code, ..out(&result, text) });
+                }
+                report = status.report;
+            }
+            e.launch_as_is(&game)?;
+            text += "HITMAN is starting.\n";
+            let result = schema::PlayResult { schema_version: SCHEMA_VERSION, deployed: deploy, started: true, report };
+            Ok(out(&result, text))
         }
         ["deploy"] => {
             if !args.yes {

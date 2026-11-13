@@ -29,7 +29,8 @@ The working state around the plan page and the docs. The plan page holds the roa
   - E4 event logs, deploy reports (the Report sheet), `diagnose`/Copy diagnostics, crash records: #21, merged as ca259c9.
   - E5 setups, the compatibility pass, auto-sort and deploy on the CLI and MCP: #22, merged as 4f9e885.
   - Fleet: the "App consolidation opportunities" session assessed this pattern for the other apps (https://claude.ai/artifact/HQtktHuqKPrehPUDhPaohk): a shared kit copied from VMM's crates, Keeplight as pilot. Nothing assigned. A Claude-in-the-app use (explaining SMF errors) is recorded as maybe later.
-  - Next: E6 Steam's Play button through `vmm play` (changes Steam launch options, so it needs the owner), E7 SMF updates (lifts the HTTP/TLS ban, needs the owner), E8 first release, E9 deploy engine, `mo2` and Cyberpunk.
+  - E6 Steam's Play button (owner's go 2026-11-13, with the addition that Play offers to play the last deployed build instead of deploying): in review. Ported Modlist Launcher's launch-options editor; Steam runs `vaexil-mod-manager.exe --steam-play -- %command%`; `vmm play [--deploy --yes | --no-deploy]`. The owner said: no install until E6 and E7 are done.
+  - Next: E7 SMF updates (lifts the HTTP/TLS ban, needs the owner), E8 first release, E9 deploy engine, `mo2` and Cyberpunk.
 - Old stages 03 to 06 now sit inside the ADR 0003 sequence (see above). The old repo `JAMARQ-Digital-LLC/vaexil-simple-mod-framework` is archived, and its Dependabot #24 closed, after the app's first deploy on this PC.
 
 ## Active Task State & Known Regressions

@@ -25,6 +25,8 @@ pub struct Settings {
     /// Settings' "Let AI tools make changes". Off unless the user turns it
     /// on; while off, AI tools can read and plan but not apply.
     pub ai_changes: bool,
+    /// What the app changed in Steam for Steam's Play button, to undo it.
+    pub steam_play: Option<crate::steam_play::SteamHook>,
     rest: Map<String, Value>,
 }
 
@@ -68,7 +70,14 @@ impl Settings {
             }
         }
         let ai_changes = rest.remove("aiChanges").and_then(|v| v.as_bool()).unwrap_or(false);
-        Ok(Settings { kind_overrides, ai_changes, rest })
+        let steam_play = rest.remove("steamPlay").and_then(|v| {
+            Some(crate::steam_play::SteamHook {
+                account_id: u32::try_from(v.get("accountId")?.as_u64()?).ok()?,
+                previous: v.get("previous")?.as_str()?.to_string(),
+                applied: v.get("applied")?.as_str()?.to_string(),
+            })
+        });
+        Ok(Settings { kind_overrides, ai_changes, steam_play, rest })
     }
 
     /// Writes `settings.json` in `dir`, replacing it in one rename.
@@ -87,6 +96,12 @@ impl Settings {
                 self.kind_overrides.iter().map(|(id, k)| (id.clone(), Value::String(k.key().into()))).collect(),
             ),
         );
+        if let Some(h) = &self.steam_play {
+            map.insert(
+                "steamPlay".into(),
+                serde_json::json!({ "accountId": h.account_id, "previous": h.previous, "applied": h.applied }),
+            );
+        }
         if self.ai_changes {
             map.insert("aiChanges".into(), Value::Bool(true));
         }

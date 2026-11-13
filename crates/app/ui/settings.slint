@@ -30,6 +30,20 @@ export global SettingsState {
     in property <string> diagnostics;
     in property <string> diagnostics-note;
     callback make-diagnostics();
+    // Steam's Play button.
+    in property <string> steam-account;
+    in property <string> steam-current;
+    in property <string> steam-proposed;
+    in property <bool> steam-connected;
+    in property <bool> steam-running;
+    in property <string> steam-problem;
+    in property <bool> steam-confirming;
+    in property <string> steam-note;
+    in property <bool> steam-note-error;
+    callback steam-connect();
+    callback steam-confirm();
+    callback steam-cancel();
+    callback steam-disconnect();
 }
 
 component CommandLine inherits VerticalLayout {
@@ -146,6 +160,73 @@ export component SettingsSheet inherits Sheet {
                     text: "Take it out of my PATH";
                     accessible-label: "Take the command line out of my PATH";
                     clicked => { SettingsState.remove-from-path(); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+                FieldLabel { text: "Steam's Play button"; }
+                Text {
+                    text: "Make Steam's own Play button start HITMAN through Vaexil Mod Manager. If your mods changed since the last deploy, it asks whether to deploy first or play the build already in the game; otherwise the game just starts.";
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: SettingsState.steam-problem != "" ? SettingsState.steam-problem
+                        : SettingsState.steam-connected ? "On for " + SettingsState.steam-account + ": Steam's Play button starts Vaexil Mod Manager."
+                        : "Off for " + SettingsState.steam-account + ". HITMAN's launch options now: " + (SettingsState.steam-current == "" ? "none" : SettingsState.steam-current);
+                    font-size: 12px;
+                    color: SettingsState.steam-problem != "" ? Theme.danger : Theme.secondary-text;
+                    wrap: word-wrap;
+                }
+                if SettingsState.steam-confirming: VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "This sets HITMAN's launch options in Steam (" + SettingsState.steam-account + ") to:";
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: SettingsState.steam-proposed;
+                        font-family: Theme.font-mono;
+                        font-size: 12px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: "replacing " + (SettingsState.steam-current == "" ? "no launch options" : "\u{201c}" + SettingsState.steam-current + "\u{201d}") + ". A copy of Steam's settings is kept first, nothing else in them changes, and you can put them back here. Steam must be closed.";
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        Button {
+                            text: "Cancel";
+                            accessible-label: "Cancel changing Steam's Play button";
+                            clicked => { SettingsState.steam-cancel(); }
+                        }
+                        Button {
+                            text: "Change Steam's launch options";
+                            primary: true;
+                            clicked => { SettingsState.steam-confirm(); }
+                        }
+                    }
+                }
+                if !SettingsState.steam-confirming && SettingsState.steam-problem == "": HorizontalLayout {
+                    alignment: start;
+                    if !SettingsState.steam-connected: Button {
+                        text: "Use Vaexil Mod Manager for Steam's Play button";
+                        clicked => { SettingsState.steam-connect(); }
+                    }
+                    if SettingsState.steam-connected: Button {
+                        text: "Put Steam's launch options back";
+                        clicked => { SettingsState.steam-disconnect(); }
+                    }
+                }
+                if SettingsState.steam-note != "": Text {
+                    text: SettingsState.steam-note;
+                    font-size: 12px;
+                    color: SettingsState.steam-note-error ? Theme.danger : Theme.ready;
+                    wrap: word-wrap;
                 }
             }
 

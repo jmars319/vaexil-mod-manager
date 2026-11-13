@@ -3,17 +3,21 @@
 mod cli_path;
 mod gui;
 mod platform;
+mod steam_launch;
 
 slint::include_modules!();
 
-const USAGE: &str =
-    "vaexil-mod-manager             Open Vaexil Mod Manager\nvaexil-mod-manager --version   Show the version";
+const USAGE: &str = "vaexil-mod-manager             Open Vaexil Mod Manager\n\
+vaexil-mod-manager --version   Show the version\n\
+vaexil-mod-manager --steam-play -- <game command>\n                               \
+What Steam's Play button runs, once Settings connects it";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     vmm_engine::crash::install(vmm_engine::host::data_dir(), "gui".into());
     let code = match args.first().map(String::as_str) {
         None => gui::run(),
+        Some("--steam-play") => steam_launch::run(&args[1..]),
         Some("--version") => {
             show_message("Vaexil Mod Manager", &format!("Version {}", env!("CARGO_PKG_VERSION")));
             0

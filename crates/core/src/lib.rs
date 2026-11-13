@@ -8,6 +8,7 @@
 //! own files. `docs/safety-model.md` lists every file that is read or written.
 
 pub mod backend;
+pub mod cmdline;
 pub mod error;
 pub mod game;
 pub mod order;

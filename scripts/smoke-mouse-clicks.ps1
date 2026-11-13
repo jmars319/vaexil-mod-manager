@@ -96,6 +96,30 @@ function Save-Shot($label) {
     } catch { "  (no screenshot: $_)" }
 }
 
+# A control below the fold of a scrolling sheet isn't listed by UI
+# Automation. This scrolls the window with the mouse wheel until the control
+# shows, which works without keyboard focus.
+function Scroll-To($window, $name) {
+    $h = [IntPtr]$window.Current.NativeWindowHandle
+    $b = $window.Current.BoundingRectangle
+    $x = [int]($b.X + $b.Width / 2); $y = [int]($b.Y + $b.Height / 2)
+    $l = [IntPtr](($y -shl 16) -bor ($x -band 0xffff))
+    # Slint scrolls what is under the pointer it last saw, so move the
+    # pointer to the middle of the window (client coordinates) first.
+    $pt = New-Object SmokeClicks+POINT; $pt.X = $x; $pt.Y = $y
+    [SmokeClicks]::ScreenToClient($h, [ref]$pt) | Out-Null
+    [SmokeClicks]::PostMessage($h, 0x0200, [IntPtr]0, [IntPtr](($pt.Y -shl 16) -bor ($pt.X -band 0xffff))) | Out-Null   # WM_MOUSEMOVE
+    Start-Sleep -Milliseconds 120
+    $byName = New-Object System.Windows.Automation.PropertyCondition ($A::NameProperty), $name
+    for ($k = 0; $k -lt 20; $k++) {
+        $c = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byName)
+        if ($c) { return $c }
+        [SmokeClicks]::PostMessage($h, 0x020A, [IntPtr](-7864320), $l) | Out-Null   # WM_MOUSEWHEEL, one notch down
+        Start-Sleep -Milliseconds 250
+    }
+    $null
+}
+
 function Check($label, [bool] $ok) {
     if (-not $ok) { $script:failed = $true; Save-Shot $label }
     '{0,-46} {1}' -f $label, $(if ($ok) { 'ok' } else { 'FAIL' })
@@ -141,6 +165,11 @@ function LoadOrder { (Get-Content $config -Raw) -match "Smoke.Mod02" }
 $psi = [System.Diagnostics.ProcessStartInfo]::new((Resolve-Path $Exe))
 $psi.Environment['VAEXIL_MOD_MANAGER_GAME'] = $work
 $psi.Environment['VAEXIL_MOD_MANAGER_DATA'] = $data
+# An empty stand-in for Steam, so Settings' Steam's Play button can never
+# reach the real Steam's settings from a test.
+$fakeSteam = Join-Path $work 'steam'
+New-Item -ItemType Directory -Force $fakeSteam | Out-Null
+$psi.Environment['VAEXIL_MOD_MANAGER_STEAM'] = $fakeSteam
 $p = [System.Diagnostics.Process]::Start($psi)
 try {
     $window = $null
@@ -275,6 +304,13 @@ try {
     Start-Sleep -Milliseconds 400
     Click $window (Find-Control $window 'Smoke Mod 03')
     Check 'deploy: a change shows as changes since the deploy' ([bool](Wait-Name 'Deploy status: Changes since the last deploy. Deploy, or Play, to put them in the game.' 8))
+    # Play with changes since the deploy asks first; Cancel starts nothing.
+    Click $window (Find-Control $window 'Play HITMAN')
+    Start-Sleep -Milliseconds 600
+    Check 'play: changes since the deploy ask first' ([bool](Find-Control $window 'Play the last deployed build'))
+    Click $window (Find-Control $window 'Cancel playing')
+    Start-Sleep -Milliseconds 400
+    Check 'play: Cancel closes the choice' (-not (Find-Control $window 'Play the last deployed build'))
 
     # Setups: save the mods that are on now.
     Click $window (Find-Control $window 'Setup: not saved. Open setups')
@@ -333,32 +369,24 @@ try {
     } else {
         Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Find-Control $window 'Take the command line out of my PATH'))
     }
+    # Steam's Play button reads the stand-in Steam, which has no account, so
+    # it says so and offers no button.
+    Check 'settings: Steam''s Play button finds no account in the stand-in' ([bool](Find-Control $window 'No Steam account has signed in on this PC, so there are no settings to change.'))
     # "Let AI tools make changes" is off until switched on, and is kept in
     # the app's settings.json (here the test's throwaway data folder).
     $settingsFile = Join-Path $data 'settings.json'
     $aiOn = { (Test-Path $settingsFile) -and ((Get-Content $settingsFile -Raw) -match '"aiChanges":\s*true') }
     Check 'settings: AI changes are off at first' (-not (& $aiOn))
-    Click $window (Find-Control $window 'Let AI tools make changes')
+    Click $window (Scroll-To $window 'Let AI tools make changes')
     Start-Sleep -Milliseconds 500
     Check 'settings: the switch allows AI changes' (& $aiOn)
-    Click $window (Find-Control $window 'Let AI tools make changes')
+    Click $window (Scroll-To $window 'Let AI tools make changes')
     Start-Sleep -Milliseconds 500
     Check 'settings: a second click turns them off' (-not (& $aiOn))
     # "Copy diagnostics" replaces the clipboard, so only on CI, never on a
     # developer's machine.
     if ($env:CI) {
-        # The button is below the fold at this window size, and UI
-        # Automation lists only what is in view: Tab to it, which scrolls it
-        # into view.
-        for ($k = 0; $k -lt 30; $k++) {
-            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-            if ($focused -and $focused.Current.Name -eq 'Copy diagnostics') { break }
-            [SmokeClicks]::PostMessage($h, 0x0100, [IntPtr]0x09, [IntPtr]0x000F0001) | Out-Null   # WM_KEYDOWN Tab
-            [SmokeClicks]::PostMessage($h, 0x0101, [IntPtr]0x09, [IntPtr]0xC00F0001) | Out-Null   # WM_KEYUP Tab
-            Start-Sleep -Milliseconds 150
-        }
-        Start-Sleep -Milliseconds 400
-        Click $window (Find-Control $window 'Copy diagnostics')
+        Click $window (Scroll-To $window 'Copy diagnostics')
         Start-Sleep -Milliseconds 800
         $copied = try { Get-Clipboard -Raw | ConvertFrom-Json } catch { $null }
         Check 'settings: Copy diagnostics copies the JSON' ($copied -and $copied.schemaVersion -eq 1 -and $copied.status.installed -gt 0)

@@ -17,6 +17,7 @@ pub mod host;
 pub mod journal;
 pub mod settings;
 pub mod setups;
+pub mod steam_play;
 pub mod store;
 
 use std::cell::RefCell;
@@ -503,17 +504,52 @@ impl Engine {
         Some(problem)
     }
 
-    /// Play: starts the game when it is up to date, or deploys first. Returns
-    /// whether a deploy was started.
-    pub fn play(&self, game: &GameInstall) -> Result<bool, VmmError> {
-        let current = self.backend.deploy_fingerprint(game).ok();
-        if current.is_some() && current == self.record.borrow().fingerprint {
-            deploy::launch(game)?;
-            Ok(false)
-        } else {
-            self.start_deploy(game, true)?;
-            Ok(true)
+    /// Whether the game has exactly the mods and settings of the last
+    /// successful deploy. `None` when that can't be worked out.
+    pub fn up_to_date(&self, game: &GameInstall) -> Option<bool> {
+        let current = self.backend.deploy_fingerprint(game).ok()?;
+        Some(self.record().fingerprint.as_deref() == Some(current.as_str()))
+    }
+
+    /// Starts the game as it is now, without deploying: the build the last
+    /// deploy left in the game. Refused while a deploy is writing it.
+    pub fn launch_as_is(&self, game: &GameInstall) -> Result<(), VmmError> {
+        self.check_no_deploy()?;
+        // When Steam's Play button starts this app, it would ask again: leave
+        // word that the choice was made just now.
+        if let (Some(dir), vmm_core::game::Store::Steam) = (&self.data_dir, game.store) {
+            let _ = std::fs::write(dir.join(PLAY_AS_IS), deploy::now_ms().to_string());
         }
+        let r = deploy::launch(game);
+        self.noted("game.started", Some(game), None, r, |()| Some("Started HITMAN without deploying.".into()))
+    }
+}
+
+/// Left by [`Engine::launch_as_is`] for the Steam handoff: the user chose to
+/// play without deploying, and Steam's Play button shouldn't ask again.
+const PLAY_AS_IS: &str = "play-as-is";
+/// How long that choice stands.
+const PLAY_AS_IS_MS: u64 = 2 * 60 * 1000;
+
+impl Engine {
+    /// Refuses while a deploy is writing the game's files.
+    pub fn check_no_deploy(&self) -> Result<(), VmmError> {
+        if self.deploy_progress().0 || !host::running(&["Deploy.exe"]).is_empty() {
+            return Err(VmmError::new(
+                ErrorCode::DeployRunning,
+                "SMF's Deploy.exe is running. Wait for it to finish, then play.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether the user chose to play without deploying in the last two
+    /// minutes (in the window, or `vmm play --no-deploy`). Taken once.
+    pub fn take_play_as_is(&self) -> bool {
+        let Some(path) = self.data_dir.as_ref().map(|d| d.join(PLAY_AS_IS)) else { return false };
+        let at: Option<u64> = std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse().ok());
+        let _ = std::fs::remove_file(&path);
+        at.is_some_and(|t| deploy::now_ms().saturating_sub(t) < PLAY_AS_IS_MS)
     }
 }
 
@@ -597,6 +633,18 @@ pub(crate) mod tests {
         assert_eq!(order(&engine), ["A", "B"]);
         engine.delete_setup(0).unwrap();
         assert!(Engine::with_data_dir(Some(data)).setups().unwrap().saved.is_empty());
+    }
+
+    #[test]
+    fn a_choice_to_play_as_is_is_taken_once_and_expires() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engine = Engine::with_data_dir(Some(tmp.path().to_path_buf()));
+        assert!(!engine.take_play_as_is());
+        std::fs::write(tmp.path().join(PLAY_AS_IS), deploy::now_ms().to_string()).unwrap();
+        assert!(engine.take_play_as_is());
+        assert!(!engine.take_play_as_is(), "used once");
+        std::fs::write(tmp.path().join(PLAY_AS_IS), (deploy::now_ms() - PLAY_AS_IS_MS - 1).to_string()).unwrap();
+        assert!(!engine.take_play_as_is(), "too old");
     }
 
     #[test]
