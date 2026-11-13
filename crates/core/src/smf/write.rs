@@ -2,13 +2,16 @@
 //! way SMF's own Mod Manager changes it (`modList/+page.svelte`,
 //! `settings/+page.svelte` and `getConfig` in `lib/utils.ts`, SMF 2.33.45).
 //!
-//! - On appends the mod's id to `loadOrder`. A mod with options and no entry
+//! - On puts the mod's id into `loadOrder`, as late as its load rules allow
+//!   (see [`crate::order::insert_position`]). A mod with options and no entry
 //!   in `modOptions` gets the options its author marked `enabledByDefault`,
 //!   which SMF's Mod Manager fills in on its next read. `Deploy.exe` applies
 //!   no options at all for a mod without an entry.
 //! - Off removes the id from `loadOrder` and leaves its options, as SMF does.
 //! - Saving options replaces the mod's `modOptions` entry with the checked
 //!   choice (see [`super::options::validate`]).
+//! - Saving a load order replaces `loadOrder` with the same ids in a new
+//!   order, and refuses any other change to it.
 //! - Every other key, and the order of keys, is kept as it was.
 //!
 //! The previous file is copied to the backup folder before each write, and
@@ -29,9 +32,19 @@ fn temp_name() -> String {
     format!("config.json.vmm-{}.tmp", std::process::id())
 }
 
+/// Where a mod being turned on goes, given the current order's ids. `None`
+/// puts it last.
+pub type Place<'a> = Option<&'a dyn Fn(&[String]) -> usize>;
+
 /// Changes `config` in memory. `options` is `None` for a mod without options.
 /// Returns whether anything changed.
-pub fn apply(config: &mut Value, mod_id: &str, enabled: bool, options: Option<&[String]>) -> Result<bool, String> {
+pub fn apply(
+    config: &mut Value,
+    mod_id: &str,
+    enabled: bool,
+    options: Option<&[String]>,
+    place: Place,
+) -> Result<bool, String> {
     let Some(root) = config.as_object_mut() else {
         return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
     };
@@ -47,7 +60,11 @@ pub fn apply(config: &mut Value, mod_id: &str, enabled: bool, options: Option<&[
         order.retain(|v| v.as_str() != Some(mod_id));
         return Ok(true);
     }
-    order.push(Value::String(mod_id.to_string()));
+    let ids: Vec<String> = order.iter().filter_map(Value::as_str).map(str::to_string).collect();
+    let at = place.map_or(ids.len(), |p| p(&ids).min(ids.len()));
+    // `at` counts ids; find the matching place among all entries.
+    let index = order.iter().enumerate().filter(|(_, v)| v.is_string()).nth(at).map_or(order.len(), |(i, _)| i);
+    order.insert(index, Value::String(mod_id.to_string()));
     if let Some(options) = options {
         let all = root.entry("modOptions").or_insert_with(|| Value::Object(Map::new()));
         if let Some(all) = all.as_object_mut()
@@ -84,9 +101,46 @@ pub fn set_enabled(
     mod_id: &str,
     enabled: bool,
     options: Option<&[String]>,
+    place: Place,
     backup_dir: Option<&Path>,
 ) -> Result<bool, String> {
-    update(smf_folder, backup_dir, |config| apply(config, mod_id, enabled, options))
+    update(smf_folder, backup_dir, |config| apply(config, mod_id, enabled, options, place))
+}
+
+/// Replaces `loadOrder` with `new_order`, which must hold the same ids.
+pub fn apply_order(config: &mut Value, new_order: &[String]) -> Result<bool, String> {
+    let Some(root) = config.as_object_mut() else {
+        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+    };
+    let current: Vec<String> = match root.get("loadOrder") {
+        None => Vec::new(),
+        Some(Value::Array(a)) if a.iter().all(Value::is_string) => {
+            a.iter().filter_map(Value::as_str).map(str::to_string).collect()
+        }
+        Some(_) => {
+            return Err(
+                "The load order in SMF's config.json is not a plain list of mods. Fix or reset it in SMF first.".into(),
+            );
+        }
+    };
+    let (mut a, mut b) = (current.clone(), new_order.to_vec());
+    a.sort();
+    b.sort();
+    if a != b {
+        return Err("SMF's load order changed while you were reordering it (a mod was turned on or off elsewhere). \
+                    Nothing was saved. Look at the new order and try again."
+            .into());
+    }
+    if current == new_order {
+        return Ok(false);
+    }
+    root.insert("loadOrder".into(), Value::Array(new_order.iter().cloned().map(Value::String).collect()));
+    Ok(true)
+}
+
+/// Saves a reordered load order in `config.json`. See [`update`].
+pub fn set_load_order(smf_folder: &Path, order: &[String], backup_dir: Option<&Path>) -> Result<bool, String> {
+    update(smf_folder, backup_dir, |config| apply_order(config, order))
 }
 
 /// Saves a mod's chosen options in `config.json`. See [`update`].
@@ -205,7 +259,7 @@ mod tests {
     #[test]
     fn turning_on_appends_and_keeps_everything_else() {
         let tmp = folder_with(SMF_WRITTEN);
-        assert!(set_enabled(tmp.path(), "C", true, None, None).unwrap());
+        assert!(set_enabled(tmp.path(), "C", true, None, None, None).unwrap());
         let text = std::fs::read_to_string(tmp.path().join("config.json")).unwrap();
         let keys: Vec<&str> =
             ["runtimePath", "retailPath", "skipIntro", "loadOrder", "modOptions", "knownMods"].to_vec();
@@ -222,7 +276,7 @@ mod tests {
     #[test]
     fn turning_off_removes_it_and_keeps_its_options() {
         let tmp = folder_with(SMF_WRITTEN);
-        assert!(set_enabled(tmp.path(), "B", false, None, None).unwrap());
+        assert!(set_enabled(tmp.path(), "B", false, None, None, None).unwrap());
         let c = read(tmp.path());
         assert_eq!(c["loadOrder"], serde_json::json!(["A"]));
         assert_eq!(c["modOptions"]["B"], serde_json::json!(["Hands — Signature Suit:Bare hands"]));
@@ -232,8 +286,8 @@ mod tests {
     fn no_change_writes_nothing() {
         let tmp = folder_with(SMF_WRITTEN);
         let backups = tmp.path().join("backups");
-        assert!(!set_enabled(tmp.path(), "A", true, None, Some(&backups)).unwrap());
-        assert!(!set_enabled(tmp.path(), "C", false, None, Some(&backups)).unwrap());
+        assert!(!set_enabled(tmp.path(), "A", true, None, None, Some(&backups)).unwrap());
+        assert!(!set_enabled(tmp.path(), "C", false, None, None, Some(&backups)).unwrap());
         assert_eq!(std::fs::read_to_string(tmp.path().join("config.json")).unwrap(), SMF_WRITTEN);
         assert!(!backups.exists());
     }
@@ -249,13 +303,13 @@ mod tests {
         ]);
         let defaults = super::super::options::default_values(manifest_options.as_array().unwrap(), &[]);
         let tmp = folder_with("{ \"loadOrder\": [] }");
-        assert!(set_enabled(tmp.path(), "M", true, Some(&defaults), None).unwrap());
+        assert!(set_enabled(tmp.path(), "M", true, Some(&defaults), None, None).unwrap());
         assert_eq!(read(tmp.path())["modOptions"]["M"], serde_json::json!(["Darker", "Hands:Bare hands"]));
 
         // A mod that already has options keeps them.
         let tmp = folder_with(SMF_WRITTEN);
-        assert!(set_enabled(tmp.path(), "B", false, None, None).unwrap());
-        assert!(set_enabled(tmp.path(), "B", true, Some(&defaults), None).unwrap());
+        assert!(set_enabled(tmp.path(), "B", false, None, None, None).unwrap());
+        assert!(set_enabled(tmp.path(), "B", true, Some(&defaults), None, None).unwrap());
         assert_eq!(read(tmp.path())["modOptions"]["B"], serde_json::json!(["Hands — Signature Suit:Bare hands"]));
     }
 
@@ -268,7 +322,7 @@ mod tests {
             std::fs::write(backups.join(format!("config-{i:015}.json")), "old").unwrap();
         }
         std::fs::write(backups.join("unrelated.txt"), "keep me").unwrap();
-        assert!(set_enabled(tmp.path(), "C", true, None, Some(&backups)).unwrap());
+        assert!(set_enabled(tmp.path(), "C", true, None, None, Some(&backups)).unwrap());
         let mut names: Vec<String> = std::fs::read_dir(&backups)
             .unwrap()
             .flatten()
@@ -280,6 +334,35 @@ mod tests {
         assert!(names.contains(&"unrelated.txt".to_string()));
         let newest = names.iter().filter(|n| n.starts_with("config-")).max().unwrap();
         assert_eq!(std::fs::read_to_string(backups.join(newest)).unwrap(), SMF_WRITTEN);
+    }
+
+    #[test]
+    fn a_new_mod_goes_where_its_place_says() {
+        let tmp = folder_with("{ loadOrder: ['A', 7, 'B'] }");
+        let place = |ids: &[String]| {
+            assert_eq!(ids, ["A", "B"]);
+            1
+        };
+        assert!(set_enabled(tmp.path(), "New", true, None, Some(&place), None).unwrap());
+        assert_eq!(read(tmp.path())["loadOrder"], serde_json::json!(["A", 7, "New", "B"]));
+    }
+
+    #[test]
+    fn saving_an_order_only_reorders() {
+        let tmp = folder_with(SMF_WRITTEN);
+        let backups = tmp.path().join("backups");
+        assert!(!set_load_order(tmp.path(), &["A".into(), "B".into()], Some(&backups)).unwrap());
+        assert!(set_load_order(tmp.path(), &["B".into(), "A".into()], Some(&backups)).unwrap());
+        let c = read(tmp.path());
+        assert_eq!(c["loadOrder"], serde_json::json!(["B", "A"]));
+        assert_eq!(c["modOptions"]["B"], serde_json::json!(["Hands — Signature Suit:Bare hands"]));
+        assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
+        for wrong in [vec!["A".to_string()], vec!["A".into(), "B".into(), "C".into()], vec!["A".into(), "C".into()]] {
+            let err = set_load_order(tmp.path(), &wrong, None).unwrap_err();
+            assert!(err.contains("Nothing was saved"), "{err}");
+        }
+        let tmp = folder_with("{ loadOrder: ['A', 7] }");
+        assert!(set_load_order(tmp.path(), &["A".into()], None).unwrap_err().contains("plain list"));
     }
 
     #[test]
@@ -304,7 +387,7 @@ mod tests {
         let tmp = folder_with(SMF_WRITTEN);
         let blocker = tmp.path().join("not-a-folder");
         std::fs::write(&blocker, "").unwrap();
-        let err = set_enabled(tmp.path(), "C", true, None, Some(&blocker)).unwrap_err();
+        let err = set_enabled(tmp.path(), "C", true, None, None, Some(&blocker)).unwrap_err();
         assert!(err.contains("Nothing was changed"), "{err}");
         assert_eq!(std::fs::read_to_string(tmp.path().join("config.json")).unwrap(), SMF_WRITTEN);
     }
@@ -313,7 +396,7 @@ mod tests {
     fn refuses_a_config_it_cannot_read() {
         for bad in ["{ not json", "[1, 2]", "{ \"loadOrder\": \"A\" }"] {
             let tmp = folder_with(bad);
-            assert!(set_enabled(tmp.path(), "C", true, None, None).is_err(), "{bad}");
+            assert!(set_enabled(tmp.path(), "C", true, None, None, None).is_err(), "{bad}");
             assert_eq!(std::fs::read_to_string(tmp.path().join("config.json")).unwrap(), bad);
         }
     }
@@ -336,7 +419,7 @@ mod tests {
     #[test]
     fn the_result_reads_back_as_json5() {
         let tmp = folder_with(SMF_WRITTEN);
-        set_enabled(tmp.path(), "C", true, None, None).unwrap();
+        set_enabled(tmp.path(), "C", true, None, None, None).unwrap();
         let text = std::fs::read_to_string(tmp.path().join("config.json")).unwrap();
         let back: Value = json5::from_str(&text).unwrap();
         assert_eq!(back, read(tmp.path()));

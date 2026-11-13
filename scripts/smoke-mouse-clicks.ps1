@@ -174,6 +174,45 @@ try {
     $win = $window.Current.BoundingRectangle
     $inView = $last -and $last.Current.HasKeyboardFocus -and $last.Current.BoundingRectangle.Bottom -le $win.Bottom
     Check 'focus: Tab to the last row scrolls it into view' $inView
+
+    # The Load order view: a move is a draft until Save. The load order is
+    # Mod01, Mod02 since the change made elsewhere above.
+    Click $window (Find-Control $window 'Load order')
+    Start-Sleep -Milliseconds 800
+    $down = Find-Control $window 'Move Smoke Mod 01 down'
+    if (-not $down) { throw "the Load order view has no 'Move Smoke Mod 01 down' button" }
+    $before = Get-Content $config -Raw
+    Click $window $down
+    Start-Sleep -Milliseconds 800
+    Check 'order: a move is not saved until Save' ((Get-Content $config -Raw) -eq $before)
+    Click $window (Find-Control $window 'Save load order')
+    Start-Sleep -Milliseconds 800
+    Check 'order: Save writes the new order' ((Get-Content $config -Raw) -match "Smoke\.Mod02`"\s*,\s*`"Smoke\.Mod01")
+
+    # Drag the first row down one place by its handle, then save.
+    $row = Find-Control $window '1. Smoke Mod 02, Other'
+    if (-not $row) { throw "no Load order row named '1. Smoke Mod 02, Other'" }
+    $b = $row.Current.BoundingRectangle
+    $pt = New-Object SmokeClicks+POINT
+    $pt.X = [int]($b.X + 17); $pt.Y = [int]($b.Y + $b.Height / 2)
+    [SmokeClicks]::ScreenToClient($h, [ref]$pt) | Out-Null
+    $lp = { param($x, $y) [IntPtr](($y -shl 16) -bor ($x -band 0xffff)) }
+    [SmokeClicks]::PostMessage($h, 0x0200, [IntPtr]0, (& $lp $pt.X $pt.Y)) | Out-Null
+    Start-Sleep -Milliseconds 100
+    [SmokeClicks]::PostMessage($h, 0x0201, [IntPtr]1, (& $lp $pt.X $pt.Y)) | Out-Null
+    foreach ($dy in 20, 40, 60, 72) {
+        Start-Sleep -Milliseconds 60
+        [SmokeClicks]::PostMessage($h, 0x0200, [IntPtr]1, (& $lp $pt.X ($pt.Y + $dy))) | Out-Null
+    }
+    Start-Sleep -Milliseconds 60
+    [SmokeClicks]::PostMessage($h, 0x0202, [IntPtr]0, (& $lp $pt.X ($pt.Y + 72))) | Out-Null
+    Start-Sleep -Milliseconds 800
+    Click $window (Find-Control $window 'Save load order')
+    Start-Sleep -Milliseconds 800
+    Check 'order: dragging a row by its handle moves it' ((Get-Content $config -Raw) -match "Smoke\.Mod01`"\s*,\s*`"Smoke\.Mod02")
+    Click $window (Find-Control $window 'Back to mods')
+    Start-Sleep -Milliseconds 600
+    Check 'order: Back returns to the Mods view' ([bool](Find-Control $window 'Edit Smoke Mod 01'))
 } finally {
     if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
 }

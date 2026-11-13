@@ -3,6 +3,7 @@
 //! writes, to `config.json` (a mod on or off, a mod's options), live in
 //! [`write`](mod@write). Nothing here runs SMF.
 
+mod files;
 mod kind;
 pub mod options;
 mod releases;
@@ -17,7 +18,7 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::framework::{Framework, Inspection, ModEntry, ModKind, Status, Version};
+use crate::framework::{Framework, Inspection, ModEntry, ModKind, OrderRule, Relation, Status, Version};
 use crate::game::GameInstall;
 
 /// A file SMF itself keeps in `Mods`; it is not a mod.
@@ -93,20 +94,29 @@ impl Framework for Smf {
     fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, String> {
         let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
         let mut options = None;
+        let mut mods = Vec::new();
         if enabled {
             let m = self.find_mod(&folder, mod_id)?;
             if let Some(problem) = &m.problem {
                 return Err(format!("{} can't be turned on. {problem}", m.name));
             }
+            let config = read_config(&folder)?;
             if m.badge.as_deref() != Some("RPKG") {
                 let manifest = read_manifest(&m.folder.join("manifest.json"))?;
                 if !manifest.options.is_empty() {
-                    let config = read_config(&folder)?;
                     options = Some(options::default_values(&manifest.options, &config.load_order));
                 }
             }
+            mods = list_mods(&folder.join("Mods"), &config, &self.kinds).0;
         }
-        write::set_enabled(&folder, mod_id, enabled, options.as_deref(), self.backup_dir.as_deref())
+        let place = |ids: &[String]| crate::order::insert_position(ids, mod_id, &mods);
+        let place: write::Place = if enabled { Some(&place) } else { None };
+        write::set_enabled(&folder, mod_id, enabled, options.as_deref(), place, self.backup_dir.as_deref())
+    }
+
+    fn set_load_order(&self, game: &GameInstall, order: &[String]) -> Result<bool, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        write::set_load_order(&folder, order, self.backup_dir.as_deref())
     }
 
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String> {
@@ -214,6 +224,41 @@ struct Manifest {
     localisation_overrides: Option<serde::de::IgnoredAny>,
     #[serde(rename = "localisedLines", default)]
     localised_lines: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "contentFolders", default)]
+    content_folders: Vec<serde_json::Value>,
+    #[serde(rename = "loadBefore", default)]
+    load_before: Vec<serde_json::Value>,
+    #[serde(rename = "loadAfter", default)]
+    load_after: Vec<serde_json::Value>,
+}
+
+/// One `loadBefore`/`loadAfter` entry before the other mod's version is known:
+/// an id, or `[id, version range]`.
+struct RawRule {
+    relation: Relation,
+    other: String,
+    range: Option<String>,
+}
+
+fn raw_rules(relation: Relation, entries: &[serde_json::Value]) -> impl Iterator<Item = RawRule> + '_ {
+    entries.iter().filter_map(move |e| match e {
+        serde_json::Value::String(id) => Some(RawRule { relation, other: id.clone(), range: None }),
+        serde_json::Value::Array(pair) => Some(RawRule {
+            relation,
+            other: pair.first()?.as_str()?.to_string(),
+            range: Some(pair.get(1)?.as_str()?.to_string()),
+        }),
+        _ => None,
+    })
+}
+
+/// Whether a version range in a rule covers `version`. SMF uses npm's semver,
+/// where a version or range that can't be read never matches; so here.
+fn range_matches(range: &str, version: Option<&str>) -> bool {
+    let (Ok(req), Some(Ok(v))) = (semver::VersionReq::parse(range), version.map(semver::Version::parse)) else {
+        return false;
+    };
+    req.matches(&v)
 }
 
 impl Manifest {
@@ -228,25 +273,44 @@ fn read_manifest(path: &Path) -> Result<Manifest, String> {
         .and_then(|t| json5::from_str::<Manifest>(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()))
 }
 
-/// Each mod's kind, worked out again only when its folder or manifest
-/// changes. Walking a large mod's files takes a moment.
+/// Each mod's kind, and the files each content folder replaces, worked out
+/// again only when the folder or its manifest changes. Walking a large mod's
+/// files takes a moment.
 #[derive(Default)]
-pub struct KindCache(RefCell<HashMap<PathBuf, (KindKey, ModKind)>>);
+pub struct KindCache {
+    kinds: RefCell<HashMap<PathBuf, (KindKey, ModKind)>>,
+    files: RefCell<HashMap<PathBuf, (KindKey, Vec<String>)>>,
+}
 
 type KindKey = (Option<SystemTime>, Option<SystemTime>, bool);
 
+fn modified(p: &Path) -> Option<SystemTime> {
+    std::fs::metadata(p).and_then(|m| m.modified()).ok()
+}
+
 impl KindCache {
     fn get(&self, folder: &Path, has_localisation: bool) -> ModKind {
-        let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
         let key = (modified(folder), modified(&folder.join("manifest.json")), has_localisation);
-        if let Some((cached, kind)) = self.0.borrow().get(folder)
+        if let Some((cached, kind)) = self.kinds.borrow().get(folder)
             && *cached == key
         {
             return *kind;
         }
         let kind = kind::classify(folder, has_localisation);
-        self.0.borrow_mut().insert(folder.to_path_buf(), (key, kind));
+        self.kinds.borrow_mut().insert(folder.to_path_buf(), (key, kind));
         kind
+    }
+
+    fn replaced_files(&self, mod_folder: &Path, content: &Path) -> Vec<String> {
+        let key = (modified(content), modified(&mod_folder.join("manifest.json")), false);
+        if let Some((cached, list)) = self.files.borrow().get(content)
+            && *cached == key
+        {
+            return list.clone();
+        }
+        let list = files::raw_resources(content);
+        self.files.borrow_mut().insert(content.to_path_buf(), (key, list.clone()));
+        list
     }
 }
 
@@ -260,6 +324,7 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
         return (Vec::new(), notes);
     };
     let mut mods = Vec::new();
+    let mut pending: Vec<(String, Vec<RawRule>)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         let file_name = entry.file_name().to_string_lossy().into_owned();
@@ -271,7 +336,24 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
             }
             continue;
         }
-        mods.push(read_mod(&path, &file_name, kinds, config));
+        mods.push(read_mod(&path, &file_name, kinds, config, &mut pending));
+    }
+    // Rules can name a version range of the other mod, so they are resolved
+    // once every mod's version is known.
+    for (id, raw) in pending {
+        let rules: Vec<OrderRule> = raw
+            .into_iter()
+            .filter(|r| match &r.range {
+                None => true,
+                Some(range) => {
+                    range_matches(range, mods.iter().find(|m| m.id == r.other).and_then(|m| m.version.as_deref()))
+                }
+            })
+            .map(|r| OrderRule { relation: r.relation, other: r.other })
+            .collect();
+        if let Some(m) = mods.iter_mut().find(|m| m.id == id) {
+            m.rules = rules;
+        }
     }
     for m in &mut mods {
         m.load_position = config.load_order.iter().position(|id| *id == m.id).map(|i| i + 1);
@@ -293,6 +375,8 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
             kind: ModKind::Other,
             load_position: Some(i + 1),
             options: Vec::new(),
+            rules: Vec::new(),
+            replaces: Vec::new(),
             problem: Some(
                 "SMF's load order lists this id, but no mod in the Mods folder has it. Turn it off to take it out \
                  of the load order."
@@ -309,7 +393,13 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
     (mods, notes)
 }
 
-fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache, config: &Config) -> ModEntry {
+fn read_mod(
+    path: &Path,
+    folder_name: &str,
+    kinds: &KindCache,
+    config: &Config,
+    pending: &mut Vec<(String, Vec<RawRule>)>,
+) -> ModEntry {
     let base = ModEntry {
         id: folder_name.to_string(),
         name: folder_name.to_string(),
@@ -321,6 +411,8 @@ fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache, config: &Config) 
         load_position: None,
         problem: None,
         options: Vec::new(),
+        rules: Vec::new(),
+        replaces: Vec::new(),
     };
     let manifest_path = path.join("manifest.json");
     if !manifest_path.is_file() {
@@ -328,15 +420,44 @@ fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache, config: &Config) 
         return ModEntry { badge: Some("RPKG".into()), ..base };
     }
     match read_manifest(&manifest_path) {
-        Ok(m) => ModEntry {
-            options: options::describe(&m.options, config.options_of(&m.id).as_deref(), &config.load_order),
-            kind: kinds.get(path, m.has_localisation()),
-            id: m.id,
-            name: m.name,
-            version: m.version,
-            authors: m.authors,
-            ..base
-        },
+        Ok(m) => {
+            let shown = options::describe(&m.options, config.options_of(&m.id).as_deref(), &config.load_order);
+            // The chosen options' own content folders and load rules count too.
+            let chosen: Vec<&serde_json::Value> = m
+                .options
+                .iter()
+                .filter(|o| options::value_of(o).is_some_and(|v| shown.iter().any(|s| s.chosen && s.value == v)))
+                .collect();
+            let mut rules: Vec<RawRule> =
+                raw_rules(Relation::Before, &m.load_before).chain(raw_rules(Relation::After, &m.load_after)).collect();
+            let mut folders: Vec<String> =
+                m.content_folders.iter().filter_map(|f| f.as_str().map(str::to_string)).collect();
+            for o in &chosen {
+                let list = |key: &str| o.get(key).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                rules.extend(raw_rules(Relation::Before, &list("loadBefore")).collect::<Vec<_>>());
+                rules.extend(raw_rules(Relation::After, &list("loadAfter")).collect::<Vec<_>>());
+                folders.extend(list("contentFolders").iter().filter_map(|f| f.as_str().map(str::to_string)));
+            }
+            let mut replaces: Vec<String> = folders
+                .iter()
+                // A content folder must stay inside the mod's own folder.
+                .filter(|f| !f.contains("..") && !Path::new(f).is_absolute())
+                .flat_map(|f| kinds.replaced_files(path, &path.join(f)))
+                .collect();
+            replaces.sort();
+            replaces.dedup();
+            pending.push((m.id.clone(), rules));
+            ModEntry {
+                options: shown,
+                kind: kinds.get(path, m.has_localisation()),
+                replaces,
+                id: m.id,
+                name: m.name,
+                version: m.version,
+                authors: m.authors,
+                ..base
+            }
+        }
         Err(e) => ModEntry { problem: Some(format!("Its manifest.json could not be read: {e}")), ..base },
     }
 }
@@ -517,6 +638,70 @@ mod tests {
 
         assert!(smf.set_options(&game, "Winter Suit", &[]).unwrap_err().contains("RPKG"));
         assert!(smf.set_options(&game, "Broken", &[]).unwrap_err().contains("can't be changed"));
+    }
+
+    #[test]
+    fn reads_load_rules_and_replaced_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let smf_folder = fake_install(tmp.path(), b"deploy");
+        std::fs::write(
+            smf_folder.join("Mods/Realistic AI/manifest.json"),
+            "{ id: 'Atampy26.RealisticAI', name: 'Realistic AI', version: '1.2.0', contentFolders: ['content'],\
+             loadBefore: ['Winter Suit', ['Someone.Accents', '>=2.0.0']], loadAfter: [['Someone.Accents', '^1']],\
+             options: [{ name: 'Extra', type: 'checkbox', enabledByDefault: true, contentFolders: ['extra'],\
+                         loadAfter: ['Other.Mod'] }] }",
+        )
+        .unwrap();
+        std::fs::write(
+            smf_folder.join("Mods/Accent Overhaul/manifest.json"),
+            "{ id: 'Someone.Accents', name: 'Accent Overhaul', version: '1.4.0', contentFolders: ['c', '../escape'] }",
+        )
+        .unwrap();
+        for f in [
+            "Realistic AI/content/chunk0/00AA00AA00AA00AA.TEMP",
+            "Realistic AI/content/chunk0/00AA00AA00AA00AA.TEMP.meta",
+            "Realistic AI/extra/chunk1/00BB00BB00BB00BB.PRIM",
+            "Realistic AI/unused/00CC00CC00CC00CC.PRIM",
+            "Accent Overhaul/c/chunk0/00aa00aa00aa00aa.temp",
+        ] {
+            let p = smf_folder.join("Mods").join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"").unwrap();
+        }
+        let game = GameInstall { store: Store::Folder, root: tmp.path().to_path_buf() };
+        let mods = Smf::default().inspect(&game).mods;
+        let ai = mods.iter().find(|m| m.id == "Atampy26.RealisticAI").unwrap();
+        let rules: Vec<(Relation, &str)> = ai.rules.iter().map(|r| (r.relation, r.other.as_str())).collect();
+        // The >=2.0.0 rule doesn't cover Accents 1.4.0; ^1 does.
+        assert_eq!(
+            rules,
+            [(Relation::Before, "Winter Suit"), (Relation::After, "Someone.Accents"), (Relation::After, "Other.Mod")]
+        );
+        assert_eq!(ai.replaces, ["00AA00AA00AA00AA.TEMP", "00BB00BB00BB00BB.PRIM"]);
+        let accents = mods.iter().find(|m| m.id == "Someone.Accents").unwrap();
+        assert_eq!(accents.replaces, ["00AA00AA00AA00AA.TEMP"]);
+    }
+
+    #[test]
+    fn a_turned_on_mod_lands_where_its_rules_allow_and_the_order_can_be_saved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let smf_folder = fake_install(tmp.path(), b"deploy");
+        std::fs::write(
+            smf_folder.join("Mods/Accent Overhaul/manifest.json"),
+            "{ id: 'Someone.Accents', name: 'Accent Overhaul', loadBefore: ['Atampy26.RealisticAI'] }",
+        )
+        .unwrap();
+        let game = GameInstall { store: Store::Folder, root: tmp.path().to_path_buf() };
+        let smf = Smf::default();
+        assert!(smf.set_enabled(&game, "Someone.Accents", true).unwrap());
+        let order = || read_config(&smf_folder).unwrap().load_order;
+        assert_eq!(order(), ["Winter Suit", "Someone.Accents", "Atampy26.RealisticAI"]);
+
+        let reordered: Vec<String> =
+            ["Atampy26.RealisticAI", "Winter Suit", "Someone.Accents"].map(String::from).to_vec();
+        assert!(smf.set_load_order(&game, &reordered).unwrap());
+        assert_eq!(order(), reordered);
+        assert!(smf.set_load_order(&game, &reordered[..2]).is_err());
     }
 
     #[test]

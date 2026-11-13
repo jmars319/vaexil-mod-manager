@@ -26,6 +26,8 @@ pub struct View {
     /// Group headings and mods, in the order the list shows them.
     pub rows: Vec<Row>,
     pub notes: Vec<String>,
+    /// Every mod the framework reported, for the Load order view.
+    pub mods: Vec<ModEntry>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -45,6 +47,8 @@ pub struct Row {
     pub can_toggle: bool,
     /// Whether the edit sheet (type and options) can be opened.
     pub can_edit: bool,
+    /// Load-order warnings: broken rules and overridden files.
+    pub notice: String,
 }
 
 /// `kinds` holds the types the user chose, by mod id; they replace the ones
@@ -112,6 +116,7 @@ pub fn build(installs: &[GameInstall], framework: &dyn Framework, kinds: &BTreeM
                 summary,
                 rows: grouped(&inspection.mods, kinds),
                 notes,
+                mods: inspection.mods,
             }
         }
     }
@@ -121,6 +126,7 @@ pub fn build(installs: &[GameInstall], framework: &dyn Framework, kinds: &BTreeM
 /// followed by its mods by name. The grouping is information only; the load
 /// position on each row is what SMF uses.
 fn grouped(mods: &[ModEntry], kinds: &BTreeMap<String, ModKind>) -> Vec<Row> {
+    let notices = super::order_view::notices(&super::order_view::current_order(mods), mods);
     let mut rows = Vec::new();
     for kind in ModKind::ALL {
         let mut group: Vec<&ModEntry> =
@@ -130,7 +136,9 @@ fn grouped(mods: &[ModEntry], kinds: &BTreeMap<String, ModKind>) -> Vec<Row> {
         }
         group.sort_by_key(|m| m.name.to_lowercase());
         rows.push(Row { heading: kind.label().to_string(), ..Row::default() });
-        rows.extend(group.into_iter().map(row));
+        rows.extend(
+            group.into_iter().map(|m| Row { notice: notices.get(&m.id).cloned().unwrap_or_default(), ..row(m) }),
+        );
     }
     rows
 }
@@ -146,6 +154,7 @@ fn message(chip: &str, chip_warn: bool, game_detail: &str, heading: &str, messag
         summary: String::new(),
         rows: Vec::new(),
         notes: Vec::new(),
+        mods: Vec::new(),
     }
 }
 
@@ -175,6 +184,7 @@ fn row(m: &ModEntry) -> Row {
         problem: m.problem.clone().unwrap_or_default(),
         can_toggle: m.problem.is_none() || m.load_position.is_some(),
         can_edit: m.problem.is_none(),
+        notice: String::new(),
     }
 }
 
@@ -201,6 +211,9 @@ mod tests {
         fn set_options(&self, _: &GameInstall, _: &str, _: &[String]) -> Result<bool, String> {
             unreachable!("the view never writes")
         }
+        fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, String> {
+            unreachable!("the view never writes")
+        }
     }
 
     fn game(store: Store, root: &str) -> GameInstall {
@@ -217,8 +230,7 @@ mod tests {
             badge: None,
             kind,
             load_position: position,
-            problem: None,
-            options: vec![],
+            ..ModEntry::default()
         }
     }
 
@@ -271,6 +283,7 @@ mod tests {
                 problem: "".into(),
                 can_toggle: true,
                 can_edit: true,
+                notice: "".into(),
             }
         );
         assert_eq!(view.rows[2].position, 0);

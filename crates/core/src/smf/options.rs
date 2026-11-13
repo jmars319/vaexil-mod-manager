@@ -20,6 +20,17 @@ struct Choice<'a> {
     requirements: Vec<&'a str>,
 }
 
+/// What SMF stores for this option when it is chosen: `name` for a checkbox,
+/// `group:name` for a select. `None` for options that can't be chosen.
+pub fn value_of(option: &Value) -> Option<String> {
+    let name = option.get("name")?.as_str()?;
+    match option.get("type")?.as_str()? {
+        "checkbox" => Some(name.to_string()),
+        "select" => Some(format!("{}:{name}", option.get("group")?.as_str()?)),
+        _ => None,
+    }
+}
+
 /// The checkbox and select options in a manifest's `options`, in order.
 fn choices(options: &[Value]) -> Vec<Choice<'_>> {
     options

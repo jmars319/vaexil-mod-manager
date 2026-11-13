@@ -185,8 +185,8 @@ mod tests {
             badge: None,
             kind: ModKind::Gameplay,
             load_position: Some(1),
-            problem: None,
             options,
+            ..ModEntry::default()
         }
     }
 

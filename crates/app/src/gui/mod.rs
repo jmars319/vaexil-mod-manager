@@ -1,8 +1,10 @@
 //! The main window. It finds HITMAN and its SMF, shows the mods grouped by
 //! kind, refreshes every few seconds, turns mods on or off in SMF's
-//! `config.json` when a switch is used, and opens the edit sheet for a mod's
-//! type and options.
+//! `config.json` when a switch is used, opens the edit sheet for a mod's
+//! type and options, and shows the Load order view, whose changes are a draft
+//! until Save.
 
+mod order_view;
 mod sheet;
 mod view;
 
@@ -13,12 +15,12 @@ use std::time::Duration;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-use vmm_core::framework::Framework;
+use vmm_core::framework::{Framework, ModEntry};
 use vmm_core::game::GameInstall;
 use vmm_core::smf::Smf;
 
 use crate::settings::Settings;
-use crate::{AppWindow, EditState, Message, ModRow, OptCheck, OptSelect, Ui};
+use crate::{AppWindow, EditState, Message, ModRow, OptCheck, OptSelect, OrderRowData, OrderState, Ui};
 
 pub fn run() -> i32 {
     let ui = match AppWindow::new() {
@@ -58,12 +60,18 @@ pub fn run() -> i32 {
         sheet: RefCell::default(),
         checks: Rc::new(VecModel::default()),
         selects: Rc::new(VecModel::default()),
+        mods: RefCell::default(),
+        draft: RefCell::default(),
+        order_note: RefCell::default(),
+        order_rows: Rc::new(VecModel::default()),
     });
+    g.set_order_rows(ModelRc::from(state.order_rows.clone()));
     let es = ui.global::<EditState>();
     es.set_checks(ModelRc::from(state.checks.clone()));
     es.set_selects(ModelRc::from(state.selects.clone()));
     refresh(&ui, &state);
     wire_sheet(&ui, &state);
+    wire_order(&ui, &state);
 
     {
         let weak = ui.as_weak();
@@ -121,6 +129,127 @@ struct State {
     sheet: RefCell<Option<sheet::EditSheet>>,
     checks: Rc<VecModel<OptCheck>>,
     selects: Rc<VecModel<OptSelect>>,
+    /// The mods from the last refresh.
+    mods: RefCell<Vec<ModEntry>>,
+    /// The Load order view's unsaved order, if it has one.
+    draft: RefCell<Option<Vec<String>>>,
+    /// A line about the last load-order action, such as what Auto-sort did.
+    order_note: RefCell<Option<Message>>,
+    order_rows: Rc<VecModel<OrderRowData>>,
+}
+
+/// The Load order view: moves and Auto-sort change a draft; Save writes it.
+fn wire_order(ui: &AppWindow, state: &Rc<State>) {
+    let g = ui.global::<Ui>();
+    let order_now =
+        |state: &State| state.draft.borrow().clone().unwrap_or_else(|| order_view::current_order(&state.mods.borrow()));
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        g.on_show_order(move |show| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.global::<Ui>().set_view(if show { "order".into() } else { "mods".into() });
+            refresh(&ui, &state);
+        });
+    }
+    // Rows in order.slint can't reach Ui, so they call OrderState, which
+    // forwards here.
+    {
+        let weak = ui.as_weak();
+        ui.global::<OrderState>().on_move_mod(move |index, delta| {
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<Ui>().invoke_move_mod(index, delta);
+            }
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        g.on_move_mod(move |index, delta| {
+            let Some(ui) = weak.upgrade() else { return };
+            let next = order_view::moved(&order_now(&state), index.max(0) as usize, delta);
+            set_draft(&state, next);
+            *state.order_note.borrow_mut() = None;
+            refresh(&ui, &state);
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        g.on_auto_sort(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let current = order_now(&state);
+            let mods = state.mods.borrow().clone();
+            let note = match vmm_core::order::auto_sort(&current, &mods) {
+                Ok(sorted) if sorted == current => {
+                    Message { text: "Auto-sort found nothing to change: every load rule is kept.".into(), error: false }
+                }
+                Ok(sorted) => {
+                    let moved = sorted.iter().zip(&current).filter(|(a, b)| a != b).count();
+                    set_draft(&state, sorted);
+                    Message {
+                        text: format!(
+                            "Auto-sort changed the places of {moved} mods to keep their load rules. Save to keep it."
+                        )
+                        .into(),
+                        error: false,
+                    }
+                }
+                Err(caught) => {
+                    let names: Vec<String> = caught
+                        .iter()
+                        .map(|id| mods.iter().find(|m| m.id == *id).map_or(id.clone(), |m| m.name.clone()))
+                        .collect();
+                    Message {
+                        text: format!(
+                            "These mods' load rules contradict each other, so Auto-sort changed nothing: {}. \
+                             Order them by hand, or turn one off.",
+                            names.join(", ")
+                        )
+                        .into(),
+                        error: true,
+                    }
+                }
+            };
+            *state.order_note.borrow_mut() = Some(note);
+            refresh(&ui, &state);
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        g.on_save_order(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(draft) = state.draft.borrow().clone() else { return };
+            let game = state.game.borrow().clone();
+            let result = match &game {
+                _ if state.data_dir.is_none() => Err("Windows didn't say where your local app data folder is \
+                     (%LOCALAPPDATA%), so there is nowhere to keep a copy of SMF's config.json. Nothing was saved."
+                    .to_string()),
+                Some(game) => state.smf.set_load_order(game, &draft),
+                None => Err("HITMAN is no longer where it was. Nothing was saved.".to_string()),
+            };
+            *state.order_note.borrow_mut() = Some(match result {
+                Ok(_) => {
+                    *state.draft.borrow_mut() = None;
+                    Message { text: "Load order saved. It reaches the game at the next deploy.".into(), error: false }
+                }
+                Err(e) => Message { text: format!("Couldn't save the load order. {e}").into(), error: true },
+            });
+            refresh(&ui, &state);
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        g.on_discard_order(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            *state.draft.borrow_mut() = None;
+            *state.order_note.borrow_mut() = None;
+            refresh(&ui, &state);
+        });
+    }
+}
+
+/// A draft equal to the saved order is no draft at all.
+fn set_draft(state: &State, next: Vec<String>) {
+    let saved = order_view::current_order(&state.mods.borrow());
+    *state.draft.borrow_mut() = if next == saved { None } else { Some(next) };
 }
 
 /// The edit sheet: opened from a row, changed in place, written on Save.
@@ -298,9 +427,48 @@ fn refresh(ui: &AppWindow, state: &State) {
             problem: r.problem.into(),
             can_toggle: r.can_toggle,
             can_edit: r.can_edit,
+            notice: r.notice.into(),
         })
         .collect();
     sync(&state.rows, fresh);
+
+    // The Load order view. A draft whose mods no longer match the ones that
+    // are on (something was turned on or off meanwhile) can't be saved.
+    *state.mods.borrow_mut() = v.mods.clone();
+    let saved = order_view::current_order(&v.mods);
+    let stale = state.draft.borrow().as_ref().is_some_and(|d| {
+        let (mut a, mut b) = (d.clone(), saved.clone());
+        a.sort();
+        b.sort();
+        a != b
+    });
+    if stale {
+        *state.draft.borrow_mut() = None;
+        *state.order_note.borrow_mut() = Some(Message {
+            text: "A mod was turned on or off while you were reordering, so the unsaved order was discarded.".into(),
+            error: true,
+        });
+    }
+    let order = state.draft.borrow().clone().unwrap_or(saved);
+    let dirty = state.draft.borrow().is_some();
+    let order_rows: Vec<OrderRowData> = order_view::rows(&order, &v.mods, &kinds)
+        .into_iter()
+        .map(|r| OrderRowData {
+            id: r.id.into(),
+            name: r.name.into(),
+            position: r.position,
+            detail: r.detail.into(),
+            notice: r.notice.into(),
+            can_up: r.can_up,
+            can_down: r.can_down,
+        })
+        .collect();
+    sync(&state.order_rows, order_rows);
+    g.set_order_summary(order_view::summary(&order, &v.mods, dirty).into());
+    g.set_order_dirty(dirty);
+    let note = state.order_note.borrow().clone().unwrap_or(Message { text: "".into(), error: false });
+    g.set_order_note(note.text);
+    g.set_order_note_error(note.error);
     let error = state.error.borrow().clone().map(|text| Message { text: text.into(), error: true });
     let settings_error =
         state.settings.borrow().as_ref().err().map(|text| Message { text: text.clone().into(), error: false });
