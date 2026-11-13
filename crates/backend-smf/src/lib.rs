@@ -74,7 +74,13 @@ impl Smf {
         if let Some((cached_key, version)) = &*self.version_cache.borrow()
             && *cached_key == key
         {
-            return Ok(version.clone());
+            // An update can name this file after it was first read.
+            return Ok(match version {
+                Version::Unknown { sha256 } => {
+                    self.learned_version(sha256).map_or_else(|| version.clone(), Version::Known)
+                }
+                known => known.clone(),
+            });
         }
         let version = match detect_version(deploy_exe)? {
             Version::Unknown { sha256 } => match self.learned_version(&sha256) {

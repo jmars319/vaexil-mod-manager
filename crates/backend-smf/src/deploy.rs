@@ -159,6 +159,12 @@ pub fn fingerprint(smf_folder: &Path) -> Result<String, VmmError> {
         h.update(e.as_bytes());
         h.update(b"\n");
     }
+    // SMF itself: an update (from this app or by hand) needs a new deploy.
+    if let Ok(meta) = std::fs::metadata(smf_folder.join("Deploy.exe")) {
+        let time =
+            meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+        h.update(format!("Deploy.exe\0{}\0{time}", meta.len()).as_bytes());
+    }
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 

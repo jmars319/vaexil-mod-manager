@@ -46,7 +46,43 @@ pub fn updating(data: &Path) -> bool {
 }
 
 /// Removes the marker when the update ends, however it ends.
+#[derive(Debug)]
 struct Marker(PathBuf);
+impl Marker {
+    /// Creates the marker, refusing while another update holds a fresh one
+    /// (in this or another of the app's processes).
+    fn take(data: &Path) -> Result<Marker, VmmError> {
+        use std::io::Write;
+        let path = data.join(UPDATING);
+        for _ in 0..2 {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut f) => {
+                    let _ = f.write_all(deploy::now_ms().to_string().as_bytes());
+                    return Ok(Marker(path));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if updating(data) {
+                        break;
+                    }
+                    // Left by a crash, or being written this instant: a
+                    // marker with no time yet is only taken once it is old.
+                    let timed = std::fs::read_to_string(&path).is_ok_and(|t| t.trim().parse::<u64>().is_ok());
+                    let young = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|t| t.elapsed().is_ok_and(|d| d.as_millis() < 10_000));
+                    if !timed && young {
+                        break;
+                    }
+                    let _ = std::fs::remove_file(&path);
+                }
+                Err(e) => {
+                    return Err(VmmError::new(ErrorCode::SaveFailed, format!("Couldn't start the update: {e}")));
+                }
+            }
+        }
+        Err(VmmError::new(ErrorCode::SmfUpdating, "SMF is already being updated. Nothing was changed."))
+    }
+}
 impl Drop for Marker {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
@@ -144,10 +180,7 @@ pub fn check(data: &Path, installed: &str) -> Result<(LastCheck, update::UpdateC
 /// people as it goes.
 pub fn run(job: &UpdateJob, progress: &mut dyn FnMut(String)) -> Result<String, VmmError> {
     check_processes()?;
-    let marker = job.data_dir.join(UPDATING);
-    std::fs::write(&marker, deploy::now_ms().to_string())
-        .map_err(|e| VmmError::new(ErrorCode::SaveFailed, format!("Couldn't start the update: {e}")))?;
-    let _marker = Marker(marker);
+    let _marker = Marker::take(&job.data_dir)?;
     let want = job.release.sha256.clone().ok_or_else(|| {
         VmmError::new(
             ErrorCode::DownloadMismatch,
@@ -365,7 +398,10 @@ mod tests {
         assert!(updating(tmp.path()));
         std::fs::write(&marker, (deploy::now_ms() - UPDATING_STALE_MS - 1).to_string()).unwrap();
         assert!(!updating(tmp.path()), "left by a crash");
-        drop(Marker(marker.clone()));
+        let taken = Marker::take(tmp.path()).expect("an old marker is taken over");
+        assert!(updating(tmp.path()));
+        assert_eq!(Marker::take(tmp.path()).unwrap_err().code, ErrorCode::SmfUpdating, "only one update at a time");
+        drop(taken);
         assert!(!marker.exists());
     }
 }
