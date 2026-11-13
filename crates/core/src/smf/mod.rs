@@ -252,13 +252,52 @@ fn raw_rules(relation: Relation, entries: &[serde_json::Value]) -> impl Iterator
     })
 }
 
-/// Whether a version range in a rule covers `version`. SMF uses npm's semver,
-/// where a version or range that can't be read never matches; so here.
+/// Whether a version range in a rule covers `version`, with npm semver's
+/// meaning, which SMF uses. A version or range that can't be read never
+/// matches, as in npm.
 fn range_matches(range: &str, version: Option<&str>) -> bool {
-    let (Ok(req), Some(Ok(v))) = (semver::VersionReq::parse(range), version.map(semver::Version::parse)) else {
+    let Some(Ok(v)) = version.map(|v| semver::Version::parse(v.trim().trim_start_matches(['v', '=']))) else {
         return false;
     };
-    req.matches(&v)
+    // `a || b`: any alternative.
+    range.split("||").any(|alt| npm_set(alt).is_some_and(|reqs| reqs.iter().all(|r| r.matches(&v))))
+}
+
+/// One npm comparator set (comparators separated by spaces, all of which
+/// must hold) as Rust semver requirements. npm and Rust differ in two places
+/// this handles: a bare version is exact in npm (`^` in Rust), and npm has
+/// hyphen ranges (`1.0.0 - 2.0.0`). `x` and `*` wildcards mean the same.
+fn npm_set(set: &str) -> Option<Vec<semver::VersionReq>> {
+    let set = set.trim();
+    if set.is_empty() || set == "*" || set.eq_ignore_ascii_case("x") {
+        return Some(vec![semver::VersionReq::STAR]);
+    }
+    if let Some((low, high)) = set.split_once(" - ") {
+        let reqs = [format!(">={}", low.trim()), format!("<={}", high.trim())];
+        return reqs.iter().map(|r| semver::VersionReq::parse(r).ok()).collect();
+    }
+    let mut out = Vec::new();
+    let mut words = set.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        // npm allows a space after the operator: ">= 1.2.0".
+        let word = match word {
+            ">" | ">=" | "<" | "<=" | "=" | "^" | "~" => format!("{word}{}", words.next()?),
+            _ => word.to_string(),
+        };
+        let op_len = word.find(|c: char| c.is_ascii_digit() || c == 'x' || c == 'X' || c == '*').unwrap_or(0);
+        let (op, ver) = word.split_at(op_len);
+        let ver = ver.trim_start_matches('v');
+        // `1.x`, `1.2.*`: Rust writes a partial version instead.
+        let ver = ver.split('.').take_while(|p| !matches!(*p, "x" | "X" | "*")).collect::<Vec<_>>().join(".");
+        let req = match (op, ver.is_empty()) {
+            (_, true) => "*".to_string(),
+            ("", false) | ("=", false) => format!("={ver}"),
+            ("~>", false) => format!("~{ver}"),
+            (_, false) => format!("{op}{ver}"),
+        };
+        out.push(semver::VersionReq::parse(&req).ok()?);
+    }
+    Some(out)
 }
 
 impl Manifest {
@@ -274,13 +313,21 @@ fn read_manifest(path: &Path) -> Result<Manifest, String> {
 }
 
 /// Each mod's kind, and the files each content folder replaces, worked out
-/// again only when the folder or its manifest changes. Walking a large mod's
-/// files takes a moment.
+/// again when the folder or its manifest changes. Walking every mod's files
+/// takes about a tenth of a second on JASON-PC (19,117 files), too slow for
+/// every refresh. A change deep inside a folder doesn't change the folder's
+/// own time, so file lists are also redone once they are [`FILES_TTL`] old.
 #[derive(Default)]
 pub struct KindCache {
     kinds: RefCell<HashMap<PathBuf, (KindKey, ModKind)>>,
-    files: RefCell<HashMap<PathBuf, (KindKey, Vec<String>)>>,
+    files: RefCell<HashMap<PathBuf, CachedFiles>>,
 }
+
+/// A content folder's file list, the key it was read under, and when.
+type CachedFiles = (KindKey, std::time::Instant, Vec<String>);
+
+/// How long a content folder's file list is trusted before it is read again.
+const FILES_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 type KindKey = (Option<SystemTime>, Option<SystemTime>, bool);
 
@@ -303,13 +350,14 @@ impl KindCache {
 
     fn replaced_files(&self, mod_folder: &Path, content: &Path) -> Vec<String> {
         let key = (modified(content), modified(&mod_folder.join("manifest.json")), false);
-        if let Some((cached, list)) = self.files.borrow().get(content)
+        if let Some((cached, at, list)) = self.files.borrow().get(content)
             && *cached == key
+            && at.elapsed() < FILES_TTL
         {
             return list.clone();
         }
         let list = files::raw_resources(content);
-        self.files.borrow_mut().insert(content.to_path_buf(), (key, list.clone()));
+        self.files.borrow_mut().insert(content.to_path_buf(), (key, std::time::Instant::now(), list.clone()));
         list
     }
 }
@@ -638,6 +686,33 @@ mod tests {
 
         assert!(smf.set_options(&game, "Winter Suit", &[]).unwrap_err().contains("RPKG"));
         assert!(smf.set_options(&game, "Broken", &[]).unwrap_err().contains("can't be changed"));
+    }
+
+    #[test]
+    fn version_ranges_mean_what_npm_semver_means() {
+        let yes = |r: &str, v: &str| assert!(range_matches(r, Some(v)), "{r} should cover {v}");
+        let no = |r: &str, v: &str| assert!(!range_matches(r, Some(v)), "{r} should not cover {v}");
+        yes("1.2.3", "1.2.3");
+        no("1.2.3", "1.2.4"); // exact in npm, not ^ as in Rust
+        yes(">=1.0.0 <2.0.0", "1.9.0");
+        no(">=1.0.0 <2.0.0", "2.0.0");
+        yes("1.0.0 || 2.0.0", "2.0.0");
+        no("1.0.0 || 2.0.0", "1.5.0");
+        yes("1.0.0 - 2.0.0", "2.0.0");
+        no("1.0.0 - 2.0.0", "2.0.1");
+        yes("1.x", "1.7.2");
+        no("1.x", "2.0.0");
+        yes("1.2.*", "1.2.9");
+        yes("^1.2.0", "1.9.0");
+        no("^1.2.0", "2.0.0");
+        yes("~1.2.0", "1.2.5");
+        no("~1.2.0", "1.3.0");
+        yes(">= 1.2.0", "1.2.0");
+        yes("*", "0.0.1");
+        yes("", "3.0.0");
+        no("not a range", "1.0.0");
+        no("1.0.0", "1.0"); // an unreadable version never matches
+        assert!(!range_matches("1.0.0", None));
     }
 
     #[test]
