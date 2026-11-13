@@ -4664,7 +4664,6 @@ dependencies = [
  "slint",
  "slint-build",
  "tempfile",
- "vmm-backend-smf",
  "vmm-core",
  "vmm-engine",
  "windows",

@@ -34,6 +34,15 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      # ADR 0003: front ends reach backends only through vmm-engine.
+      - name: Front ends depend on the engine, not on backends
+        shell: bash
+        run: |
+          if cargo tree -p vaexil-mod-manager -e normal --depth 1 --locked | grep -E 'vmm-backend-'; then
+            echo "The window depends on a backend crate directly; go through vmm-engine instead." >&2
+            exit 1
+          fi
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 

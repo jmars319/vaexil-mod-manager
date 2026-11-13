@@ -260,6 +260,13 @@ impl Engine {
         self.backend.deploy_fingerprint(game)
     }
 
+    /// A cheap stand-in for [`Engine::fingerprint`]'s cache: it changes with
+    /// anything the app itself writes and with mods added or removed, but not
+    /// with a file changed deep inside a mod.
+    pub fn quick_key(&self, game: &GameInstall) -> String {
+        vmm_backend_smf::find_folder(&game.root).map(|f| vmm_backend_smf::deploy::quick_key(&f)).unwrap_or_default()
+    }
+
     pub fn record(&self) -> deploy::Record {
         self.record.borrow().clone()
     }

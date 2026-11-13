@@ -222,11 +222,7 @@ pub fn refresh_extras(ui: &AppWindow, state: &State) {
     // one while a cheap check (config.json and the top of Mods) is unchanged,
     // for up to 30 seconds. Play and Deploy always take a fresh one.
     let current = {
-        let quick = game
-            .as_ref()
-            .and_then(|g| vmm_backend_smf::find_folder(&g.root))
-            .map(|f| vmm_backend_smf::deploy::quick_key(&f))
-            .unwrap_or_default();
+        let quick = game.as_ref().map(|g| state.engine.quick_key(g)).unwrap_or_default();
         let mut cached = state.fingerprint.borrow_mut();
         let fresh = cached.as_ref().is_some_and(|(at, key, _)| *key == quick && at.elapsed() < Duration::from_secs(30));
         if !fresh {
