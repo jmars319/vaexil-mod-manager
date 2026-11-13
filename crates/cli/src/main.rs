@@ -211,7 +211,12 @@ fn run(args: Args) -> Result<Out, VmmError> {
                 )));
             }
             let e = engine();
-            let r = e.apply_plan(&e.pick_game(args.game.as_deref())?, id)?;
+            // Without --game, the game the plan was made for.
+            let game = match args.game.as_deref() {
+                Some(folder) => e.pick_game(Some(folder))?,
+                None => e.plan_game(id)?,
+            };
+            let r = e.apply_plan(&game, id)?;
             let mut text = String::new();
             for s in &r.steps {
                 let note = if s.changes_something { "" } else { " (already so)" };

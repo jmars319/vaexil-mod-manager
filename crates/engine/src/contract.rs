@@ -306,16 +306,23 @@ impl Engine {
                             format!("{} can't be turned on. {problem}", mod_label(m)),
                         ));
                     }
+                    // Where the backend will put it: the same rule-aware
+                    // insertion, so the step can say the exact place and a
+                    // rule changed after planning changes the step.
+                    let mut place = None;
                     if *enabled && !on {
-                        sim.order.push(mod_id.clone());
+                        let at = vmm_core::order::insert_position(&sim.order, mod_id, mods);
+                        sim.order.insert(at, mod_id.clone());
+                        place = Some((at + 1, sim.order.len()));
                         // Turning a mod on gives it its default options.
                         let defaults = m.options.iter().filter(|o| o.chosen).map(|o| o.value.clone()).collect();
                         sim.chosen.insert(mod_id.clone(), defaults);
                     } else if !*enabled {
                         sim.order.retain(|id| id != mod_id);
                     }
+                    let at = place.map(|(p, n)| format!(", at place {p} of {n} in the load order")).unwrap_or_default();
                     PlanStep {
-                        description: format!("Turn {} {}", mod_label(m), if *enabled { "on" } else { "off" }),
+                        description: format!("Turn {} {}{at}", mod_label(m), if *enabled { "on" } else { "off" }),
                         changes_something: *enabled != on,
                     }
                 }
@@ -427,6 +434,29 @@ impl Engine {
             .and_then(|()| std::fs::rename(&tmp, &path))
             .map_err(|e| VmmError::new(ErrorCode::SaveFailed, format!("Couldn't save the plan: {e}")))?;
         Ok(plan)
+    }
+
+    /// The game a saved plan is for: the install found at its folder, or
+    /// that folder as it is. Lets `vmm apply` work without `--game`.
+    pub fn plan_game(&self, plan_id: &str) -> Result<GameInstall, VmmError> {
+        let not_found = || {
+            VmmError::new(
+                ErrorCode::PlanNotFound,
+                format!("There is no plan \u{201c}{plan_id}\u{201d}. It may have been applied already."),
+            )
+        };
+        if !valid_plan_id(plan_id) {
+            return Err(not_found());
+        }
+        let path = self.plans_dir()?.join(format!("{plan_id}.json"));
+        let plan: Plan =
+            std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or_else(not_found)?;
+        let root = PathBuf::from(&plan.game);
+        Ok(self
+            .installs()
+            .into_iter()
+            .find(|g| g.root == root)
+            .unwrap_or(GameInstall { store: vmm_core::game::Store::Folder, root }))
     }
 
     /// Applies a saved plan, once, if nothing it depends on has changed.
@@ -720,6 +750,26 @@ mod tests {
         assert_eq!(err.code, ErrorCode::ModUnreadable);
         // Turning it off is still allowed.
         engine.plan(&game, vec![Change::SetEnabled { mod_id: "A".into(), enabled: false }]).unwrap();
+    }
+
+    #[test]
+    fn an_enable_step_names_its_place_and_a_rule_change_stales_the_plan() {
+        let (_tmp, game, engine) = setup();
+        let plan = engine.plan(&game, vec![Change::SetEnabled { mod_id: "B".into(), enabled: true }]).unwrap();
+        assert!(
+            plan.steps[0].description.ends_with("at place 2 of 2 in the load order"),
+            "{}",
+            plan.steps[0].description
+        );
+        assert_eq!(engine.plan_game(&plan.plan_id).unwrap().root, game.root);
+        // A (on) now says it must load after B, so B would go first instead.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', loadAfter: ['B'] }",
+        )
+        .unwrap();
+        let err = engine.apply_plan(&game, &plan.plan_id).unwrap_err();
+        assert_eq!(err.code, ErrorCode::ConfigChangedMeanwhile);
     }
 
     #[test]
