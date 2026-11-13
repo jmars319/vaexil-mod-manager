@@ -11,6 +11,7 @@
 pub mod contract;
 pub mod deploy;
 pub mod host;
+pub mod journal;
 pub mod settings;
 pub mod setups;
 pub mod store;
@@ -153,6 +154,23 @@ impl Engine {
             Some(k) => settings.kind_overrides.insert(mod_id.to_string(), k),
             None => settings.kind_overrides.remove(mod_id),
         };
+        settings.save(&dir)?;
+        *self.settings.borrow_mut() = Ok(settings);
+        Ok(())
+    }
+
+    /// Settings' "Let AI tools make changes", read again from disk so a
+    /// change in the window reaches a running `vmm mcp` at once.
+    pub fn ai_changes_allowed(&self) -> bool {
+        self.data_dir.as_deref().and_then(|d| Settings::load(d).ok()).is_some_and(|s| s.ai_changes)
+    }
+
+    pub fn set_ai_changes(&self, on: bool) -> Result<(), VmmError> {
+        let dir = self.data_dir.clone().ok_or_else(|| {
+            VmmError::new(ErrorCode::BackupUnavailable, "There is no folder to keep settings in. Nothing was changed.")
+        })?;
+        let mut settings = Settings::load(&dir)?;
+        settings.ai_changes = on;
         settings.save(&dir)?;
         *self.settings.borrow_mut() = Ok(settings);
         Ok(())

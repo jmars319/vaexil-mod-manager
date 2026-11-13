@@ -22,7 +22,7 @@ Early development, nothing released yet. It can now:
 - **Run a compatibility pass** after a game update: start with every mod off or from the mods on now, try small batches, and mark each good (it joins the baseline) or bad (the game goes back to the baseline). Saves are never touched.
 - **Deploy and Play:** run SMF's own `Deploy.exe` unchanged, with its output in a log, and start HITMAN through Steam. Deploy and Play refuse while the game is running.
 
-The AI connection (an MCP server, ADR 0003), keeping SMF current, and Steam's own Play button come in later stages on the plan page.
+Keeping SMF current and Steam's own Play button come in later stages on the plan page.
 
 ## Command line
 
@@ -34,6 +34,10 @@ vmm apply <plan id> --yes
 ```
 
 Add `--json` to any command for one JSON object in the shapes under [`schema/`](schema/) (`vmm schema` writes them; `vmm errors` lists the error codes). Exit codes: 0 ok, 2 bad usage, 3 refused by a rule, 4 changed meanwhile, 5 the game or a deploy is running, 10 unexpected. Settings in the window can put `vmm` on your PATH; nothing else does.
+
+## AI apps
+
+`vmm mcp` is an MCP server, so Claude Code, Gemini CLI, Codex CLI or another MCP client can read your mods and, when you ask, change them through structured tools rather than screen control. It works over stdio only and makes no network connection. Changes from AI tools are off until you turn on "Let AI tools make changes" in Settings, and each one is recorded with your request. Setup and the tool list are in [docs/ai.md](docs/ai.md).
 
 ## Build from source
 

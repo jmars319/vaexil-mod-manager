@@ -68,7 +68,7 @@ pub fn run() -> i32 {
     let _deploy_timer = wire::wire_play(&ui, &state);
     wire::wire_setups(&ui, &state);
     wire::wire_pass(&ui, &state);
-    settings::wire_settings(&ui);
+    settings::wire_settings(&ui, &state);
     refresh(&ui, &state);
 
     {

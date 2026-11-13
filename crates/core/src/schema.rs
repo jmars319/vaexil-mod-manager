@@ -324,6 +324,8 @@ pub struct ApplyReport {
     pub steps: Vec<PlanStep>,
     /// Whether the game needs a deploy for the changes to take effect.
     pub needs_deploy: bool,
+    /// Set when the changes were made but couldn't be recorded in the journal.
+    pub journal_problem: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

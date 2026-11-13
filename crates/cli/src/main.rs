@@ -6,6 +6,8 @@
 //! 0 ok, 2 bad usage, 3 refused by a rule, 4 changed meanwhile, 5 the game or
 //! a deploy is running, 10 unexpected. Nothing changes without `--yes`.
 
+mod mcp;
+
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -16,6 +18,7 @@ use vmm_core::backend::ModKind;
 use vmm_core::error::{ErrorCode, VmmError};
 use vmm_core::schema::{self, Change, ErrorCodeList, ErrorReport, SCHEMA_VERSION};
 use vmm_engine::Engine;
+use vmm_engine::journal::Caller;
 
 const USAGE: &str = "\
 vmm - Vaexil Mod Manager's command line
@@ -42,6 +45,11 @@ Changing (plan first, then apply the plan):
   vmm plan --file <path|->      changes as JSON: a list of changes, or
                                 { \"changes\": [...] } (see `vmm schema`)
   vmm apply <plan-id> --yes     apply a plan, once, within 10 minutes
+
+For AI tools:
+  vmm mcp                       an MCP server on stdin and stdout (docs/ai.md).
+                                It may read freely; it applies a change only
+                                when Settings allows AI changes.
 
 Options:
   --json                        print one JSON object (the result, or an error)
@@ -111,6 +119,16 @@ fn out<T: Serialize>(value: &T, text: String) -> Out {
 
 fn main() -> ExitCode {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    // The MCP server owns stdout for the protocol, so it prints nothing else.
+    if raw == ["mcp"] {
+        return match mcp::serve() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(10)
+            }
+        };
+    }
     let json_wanted = raw.iter().any(|a| a == "--json");
     let result = parse(raw).and_then(|args| {
         let json = args.json;
@@ -220,11 +238,14 @@ fn run(args: Args) -> Result<Out, VmmError> {
                 Some(folder) => e.pick_game(Some(folder))?,
                 None => e.plan_game(id)?,
             };
-            let r = e.apply_plan(&game, id)?;
+            let r = e.apply_plan(&game, id, &Caller::Cli, None)?;
             let mut text = String::new();
             for s in &r.steps {
                 let note = if s.changes_something { "" } else { " (already so)" };
                 text += &format!("Done: {}{note}\n", s.description);
+            }
+            if let Some(p) = &r.journal_problem {
+                text += &format!("{p}\n");
             }
             if r.needs_deploy {
                 text += "Deploy in Vaexil Mod Manager for the game to use the changes.\n";

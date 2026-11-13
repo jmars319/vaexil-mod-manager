@@ -50,10 +50,13 @@ pub enum ErrorCode {
     PlanNotFound,
     /// The plan is older than 10 minutes.
     PlanExpired,
+    /// An AI tool tried to apply a change while Settings' "Let AI tools make
+    /// changes" is off.
+    AiChangesOff,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 21] = [
+    pub const ALL: [ErrorCode; 22] = [
         ErrorCode::GameNotFound,
         ErrorCode::FrameworkMissing,
         ErrorCode::ConfigUnreadable,
@@ -75,6 +78,7 @@ impl ErrorCode {
         ErrorCode::Usage,
         ErrorCode::PlanNotFound,
         ErrorCode::PlanExpired,
+        ErrorCode::AiChangesOff,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -100,6 +104,7 @@ impl ErrorCode {
             ErrorCode::Usage => "usage.invalid",
             ErrorCode::PlanNotFound => "plan.not_found",
             ErrorCode::PlanExpired => "plan.expired",
+            ErrorCode::AiChangesOff => "ai.changes_off",
         }
     }
 
@@ -127,6 +132,7 @@ impl ErrorCode {
             ErrorCode::Usage => "A command line that vmm can't read, or a change without --yes.",
             ErrorCode::PlanNotFound => "No plan has that id, or it was already applied.",
             ErrorCode::PlanExpired => "The plan is more than 10 minutes old.",
+            ErrorCode::AiChangesOff => "AI tools may read and plan, but changes from them are turned off in Settings.",
         }
     }
 
@@ -162,6 +168,9 @@ impl ErrorCode {
             ErrorCode::Usage => "Run `vmm help` for the commands. Changes need --yes.",
             ErrorCode::PlanNotFound => "Plan the change again and apply the plan id it gives.",
             ErrorCode::PlanExpired => "Plan the change again and apply the new plan.",
+            ErrorCode::AiChangesOff => {
+                "Tell the user. They can turn on \"Let AI tools make changes\" in Vaexil Mod Manager's Settings, or make the change themselves."
+            }
         }
     }
 

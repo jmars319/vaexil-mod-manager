@@ -18,6 +18,13 @@
     "needsDeploy": {
       "type": "boolean",
       "description": "Whether the game needs a deploy for the changes to take effect."
+    },
+    "journalProblem": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Set when the changes were made but couldn't be recorded in the journal."
     }
   },
   "required": [
