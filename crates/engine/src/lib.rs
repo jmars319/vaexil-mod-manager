@@ -17,6 +17,7 @@ pub mod host;
 pub mod journal;
 pub mod settings;
 pub mod setups;
+pub mod steam_play;
 pub mod store;
 
 use std::cell::RefCell;
@@ -503,17 +504,24 @@ impl Engine {
         Some(problem)
     }
 
-    /// Play: starts the game when it is up to date, or deploys first. Returns
-    /// whether a deploy was started.
-    pub fn play(&self, game: &GameInstall) -> Result<bool, VmmError> {
-        let current = self.backend.deploy_fingerprint(game).ok();
-        if current.is_some() && current == self.record.borrow().fingerprint {
-            deploy::launch(game)?;
-            Ok(false)
-        } else {
-            self.start_deploy(game, true)?;
-            Ok(true)
+    /// Whether the game has exactly the mods and settings of the last
+    /// successful deploy. `None` when that can't be worked out.
+    pub fn up_to_date(&self, game: &GameInstall) -> Option<bool> {
+        let current = self.backend.deploy_fingerprint(game).ok()?;
+        Some(self.record().fingerprint.as_deref() == Some(current.as_str()))
+    }
+
+    /// Starts the game as it is now, without deploying: the build the last
+    /// deploy left in the game. Refused while a deploy is writing it.
+    pub fn launch_as_is(&self, game: &GameInstall) -> Result<(), VmmError> {
+        if self.deploy_progress().0 || !host::running(&["Deploy.exe"]).is_empty() {
+            return Err(VmmError::new(
+                ErrorCode::DeployRunning,
+                "SMF's Deploy.exe is running. Wait for it to finish, then play.",
+            ));
         }
+        let r = deploy::launch(game);
+        self.noted("game.started", Some(game), None, r, |()| Some("Started HITMAN without deploying.".into()))
     }
 }
 

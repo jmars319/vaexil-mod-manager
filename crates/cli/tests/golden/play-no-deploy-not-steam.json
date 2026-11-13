@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "launch.unsupported",
+    "message": "Play starts HITMAN through Steam, and this copy is from Folder. Start HITMAN from there.",
+    "hint": "Start the game from its own launcher.",
+    "retryable": false,
+    "exitCode": 3
+  }
+}

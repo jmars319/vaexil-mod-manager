@@ -9,7 +9,7 @@ use vmm_engine::deploy as play;
 use vmm_engine::setups::BatchStatus;
 
 use super::{State, refresh};
-use crate::{AppWindow, PassBatch, PassCandidate, PassState, SetupsState, Ui};
+use crate::{AppWindow, PassBatch, PassCandidate, PassState, PlayState, SetupsState, Ui};
 
 /// Deploy, Play and Open log, plus the timer that follows a running deploy.
 pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
@@ -30,9 +30,47 @@ pub fn wire_play(ui: &AppWindow, state: &Rc<State>) -> slint::Timer {
             let Some(game) = state.game.borrow().clone() else { return };
             // The status line takes its own fingerprint next time.
             *state.fingerprint.borrow_mut() = None;
-            note(&state, state.engine.play(&game).err().map(|e| e.message));
+            if state.engine.up_to_date(&game) == Some(true) {
+                note(&state, state.engine.launch_as_is(&game).err().map(|e| e.message));
+            } else {
+                // Changes since the last deploy: deploy first, or play as is.
+                ui.global::<PlayState>().set_reason(crate::steam_launch::reason(&state.engine).into());
+                ui.global::<Ui>().set_sheet("play".into());
+            }
             refresh(&ui, &state);
         });
+    }
+    {
+        let ps = ui.global::<PlayState>();
+        let close = |ui: &AppWindow| ui.global::<Ui>().set_sheet("".into());
+        {
+            let (weak, state) = (ui.as_weak(), state.clone());
+            ps.on_deploy_then_play(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                close(&ui);
+                let Some(game) = state.game.borrow().clone() else { return };
+                note(&state, state.engine.start_deploy(&game, true).err().map(|e| e.message));
+                refresh(&ui, &state);
+            });
+        }
+        {
+            let (weak, state) = (ui.as_weak(), state.clone());
+            ps.on_play_now(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                close(&ui);
+                let Some(game) = state.game.borrow().clone() else { return };
+                note(&state, state.engine.launch_as_is(&game).err().map(|e| e.message));
+                refresh(&ui, &state);
+            });
+        }
+        {
+            let weak = ui.as_weak();
+            ps.on_cancel(move || {
+                if let Some(ui) = weak.upgrade() {
+                    close(&ui);
+                }
+            });
+        }
     }
     {
         let (weak, state) = (ui.as_weak(), state.clone());

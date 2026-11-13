@@ -21,6 +21,7 @@ Early development, nothing released yet. It can now:
 - **Keep setups:** save the mods that are on, in their order and with their options, and switch between saved setups.
 - **Run a compatibility pass** after a game update: start with every mod off or from the mods on now, try small batches, and mark each good (it joins the baseline) or bad (the game goes back to the baseline). Saves are never touched.
 - **Deploy and Play:** run SMF's own `Deploy.exe` unchanged, with its output in a log, and start HITMAN through Steam. Deploy and Play refuse while the game is running. **Report** reads that log into stages, warnings grouped by mod (each counted once) and errors.
+- **Steam's Play button:** Settings can make Steam's own Play button start HITMAN through Vaexil Mod Manager, after showing exactly what changes in Steam's settings and keeping a copy. With changes since the last deploy, Play (in the app or in Steam) asks whether to deploy first or play the build already in the game.
 - **Logs and diagnostics:** every change and failure goes to an event log with who made it (the window, `vmm`, or an AI app), and Settings' **Copy diagnostics** copies everything needed to look into a problem.
 
 Keeping SMF current and Steam's own Play button come in later stages on the plan page.
@@ -34,7 +35,7 @@ vmm plan enable Some.Mod.Id
 vmm apply <plan id> --yes
 ```
 
-Setups (`use-setup`, `save-setup`, `delete-setup`), auto-sort and the compatibility pass (`start-pass`, `try-batch`, `mark-batch`, `end-pass`) are planned the same way, and `vmm setups` shows them. `vmm deploy --yes` runs SMF's `Deploy.exe` and waits for its report.
+Setups (`use-setup`, `save-setup`, `delete-setup`), auto-sort and the compatibility pass (`start-pass`, `try-batch`, `mark-batch`, `end-pass`) are planned the same way, and `vmm setups` shows them. `vmm deploy --yes` runs SMF's `Deploy.exe` and waits for its report. `vmm play` starts HITMAN when it has your mods; with changes since the last deploy, add `--deploy --yes` to deploy first or `--no-deploy` to play the build already in the game.
 
 Add `--json` to any command for one JSON object in the shapes under [`schema/`](schema/) (`vmm schema` writes them; `vmm errors` lists the error codes). Exit codes: 0 ok, 2 bad usage, 3 refused by a rule, 4 changed meanwhile, 5 the game or a deploy is running, 6 the deploy ran and failed (`vmm deploy` still prints its report), 10 unexpected. Settings in the window can put `vmm` on your PATH; nothing else does.
 

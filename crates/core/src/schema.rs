@@ -609,6 +609,18 @@ pub struct DeployStatus {
     pub report: Option<DeployReport>,
 }
 
+/// `vmm play`: whether it deployed first, and the deploy's report if so.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayResult {
+    pub schema_version: u32,
+    /// Whether a deploy ran before the game started.
+    pub deployed: bool,
+    /// Whether the game was started.
+    pub started: bool,
+    pub report: Option<DeployReport>,
+}
+
 /// `vmm deploy-report`: the last deploy, or none yet.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -667,6 +679,7 @@ pub fn all() -> Vec<(&'static str, schemars::Schema)> {
         ("last-deploy", schemars::schema_for!(LastDeploy)),
         ("setup-list", schemars::schema_for!(SetupList)),
         ("deploy-status", schemars::schema_for!(DeployStatus)),
+        ("play-result", schemars::schema_for!(PlayResult)),
         ("diagnosis", schemars::schema_for!(Diagnosis)),
     ]
 }

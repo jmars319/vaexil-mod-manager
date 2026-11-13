@@ -1,0 +1,198 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "deployed": {
+      "type": "boolean",
+      "description": "Whether a deploy ran before the game started."
+    },
+    "started": {
+      "type": "boolean",
+      "description": "Whether the game was started."
+    },
+    "report": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeployReport"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "deployed",
+    "started"
+  ],
+  "description": "`vmm play`: whether it deployed first, and the deploy's report if so.",
+  "title": "PlayResult",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "DeployReport": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "result": {
+          "$ref": "#/$defs/DeployResult"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "startedAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "finishedAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeployStage"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeployWarning"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Lines the tool marked as errors, and Vaexil Mod Manager's own reason\nwhen the tool could not run."
+        },
+        "log": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The full log."
+        },
+        "logLines": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "result",
+        "stages",
+        "warnings",
+        "errors",
+        "logLines"
+      ],
+      "description": "The last deploy, read from the deploy tool's own output. A line the\nparser doesn't recognise stays only in the raw log and never fails it."
+    },
+    "DeployResult": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "did_not_run",
+          "description": "The deploy tool could not be started, or ended without saying."
+        }
+      ],
+      "description": "How a deploy ended."
+    },
+    "DeployStage": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The mod the stage was for, when it was for one."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "description": "A stage the deploy tool reported, in order."
+    },
+    "DeployWarning": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable code such as `smf.raw_entity_file`, or `smf.warning` for one\nthis version doesn't recognise."
+        },
+        "mod": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The mod's name as the deploy tool gave it, when it named one."
+        },
+        "count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "description": "How many distinct warnings of this kind."
+        },
+        "detail": {
+          "type": "string",
+          "description": "What it means, in plain words."
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Up to five of the warnings as the tool wrote them."
+        }
+      },
+      "required": [
+        "code",
+        "count",
+        "detail",
+        "examples"
+      ],
+      "description": "Warnings of one kind about one mod, counted once each."
+    }
+  }
+}

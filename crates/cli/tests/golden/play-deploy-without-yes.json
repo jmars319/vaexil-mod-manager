@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "usage.invalid",
+    "message": "Deploying runs SMF's Deploy.exe, which rewrites the game's patch files. Run `vmm play --deploy --yes` to confirm. Nothing was changed.",
+    "hint": "Run `vmm help` for the commands. Changes need --yes.",
+    "retryable": false,
+    "exitCode": 2
+  }
+}

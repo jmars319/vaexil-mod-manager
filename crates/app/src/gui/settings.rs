@@ -27,8 +27,22 @@ fn connect_commands(exe: &Path) -> [String; 3] {
 }
 
 /// Reads where `vmm.exe` is and whether it is on PATH into the sheet.
+/// Steam's Play button as it stands, into the sheet.
+fn show_steam(ui: &AppWindow, state: &State) {
+    let ss = ui.global::<SettingsState>();
+    let exe = std::env::current_exe().unwrap_or_default();
+    let v = state.engine.steam_play_view(&exe);
+    ss.set_steam_account(v.account.unwrap_or_default().into());
+    ss.set_steam_current(v.current.into());
+    ss.set_steam_proposed(v.proposed.into());
+    ss.set_steam_connected(v.connected);
+    ss.set_steam_running(v.steam_running);
+    ss.set_steam_problem(v.problem.unwrap_or_default().into());
+}
+
 fn show(ui: &AppWindow, state: &State) {
     let ss = ui.global::<SettingsState>();
+    show_steam(ui, state);
     ss.set_ai_changes(state.engine.ai_changes_allowed());
     let exe = cli_path::cli_exe();
     let [claude, gemini, codex] = exe.as_deref().map(connect_commands).unwrap_or_default();
@@ -81,6 +95,8 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
             ss.set_note_error(false);
             ss.set_ai_note("".into());
             ss.set_diagnostics_note("".into());
+            ss.set_steam_confirming(false);
+            ss.set_steam_note("".into());
             show(&ui, &state);
             ui.global::<Ui>().set_sheet("settings".into());
         });
@@ -134,6 +150,53 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
             ss.set_diagnostics(serde_json::to_string_pretty(&d).unwrap_or_default().into());
             ss.set_diagnostics_note("Copied.".into());
         });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        ss.on_steam_connect(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            show_steam(&ui, &state);
+            let ss = ui.global::<SettingsState>();
+            ss.set_steam_note("".into());
+            ss.set_steam_confirming(true);
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ss.on_steam_cancel(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<SettingsState>().set_steam_confirming(false);
+            }
+        });
+    }
+    for connect in [true, false] {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        let handler = move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let r = if connect {
+                state.engine.connect_steam_play(&std::env::current_exe().unwrap_or_default())
+            } else {
+                state.engine.disconnect_steam_play()
+            };
+            let ss = ui.global::<SettingsState>();
+            ss.set_steam_confirming(false);
+            show_steam(&ui, &state);
+            match r {
+                Ok(m) => {
+                    ss.set_steam_note(m.into());
+                    ss.set_steam_note_error(false);
+                }
+                Err(e) => {
+                    ss.set_steam_note(e.message.into());
+                    ss.set_steam_note_error(true);
+                }
+            }
+        };
+        if connect {
+            ss.on_steam_confirm(handler);
+        } else {
+            ss.on_steam_disconnect(handler);
+        }
     }
     {
         let weak = ui.as_weak();

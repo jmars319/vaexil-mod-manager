@@ -175,7 +175,7 @@ pub fn launch(game: &GameInstall) -> Result<(), VmmError> {
         other => Err(VmmError::new(
             ErrorCode::LaunchUnsupported,
             format!(
-                "Play starts HITMAN through Steam, and this copy is from {}. Start HITMAN from there; the deploy is done.",
+                "Play starts HITMAN through Steam, and this copy is from {}. Start HITMAN from there.",
                 other.label()
             ),
         )),

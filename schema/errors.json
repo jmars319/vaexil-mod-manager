@@ -161,6 +161,20 @@
       "hint": "Read the deploy report (vmm deploy-report): its errors and the log name the mod or file that failed.",
       "retryable": false,
       "exitCode": 6
+    },
+    {
+      "code": "steam.running",
+      "meaning": "Steam is running, so its settings can't be changed.",
+      "hint": "Exit Steam completely (Steam menu > Exit), then try again.",
+      "retryable": true,
+      "exitCode": 5
+    },
+    {
+      "code": "steam.unavailable",
+      "meaning": "Steam, a signed-in Steam account, or its settings can't be found or read.",
+      "hint": "Check that Steam is installed and you have signed in on this PC at least once.",
+      "retryable": false,
+      "exitCode": 3
     }
   ]
 }

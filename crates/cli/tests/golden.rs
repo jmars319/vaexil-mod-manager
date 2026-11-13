@@ -158,6 +158,11 @@ fn setups_and_a_compatibility_pass_from_the_command_line() {
     plan_and_apply(&f, "use-setup", &["use-setup", "Just", "A"]);
     f.check("order-after-use-setup", &["order"], 0);
     f.check("deploy-without-yes", &["deploy"], 2);
+    // Nothing deployed from VMM yet: play asks which, and a deploy needs --yes.
+    f.check("play-needs-a-choice", &["play"], 2);
+    f.check("play-deploy-without-yes", &["play", "--deploy"], 2);
+    // The fake game isn't a Steam copy, so it can't be started; nothing runs.
+    f.check("play-no-deploy-not-steam", &["play", "--no-deploy"], 3);
 }
 
 #[test]

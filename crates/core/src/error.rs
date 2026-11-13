@@ -55,10 +55,14 @@ pub enum ErrorCode {
     AiChangesOff,
     /// The framework's deploy ran and reported failure.
     DeployFailed,
+    /// Steam is running, so its settings can't be changed.
+    SteamRunning,
+    /// Steam, a signed-in account, or its settings can't be found or read.
+    SteamUnavailable,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 23] = [
+    pub const ALL: [ErrorCode; 25] = [
         ErrorCode::GameNotFound,
         ErrorCode::FrameworkMissing,
         ErrorCode::ConfigUnreadable,
@@ -82,6 +86,8 @@ impl ErrorCode {
         ErrorCode::PlanExpired,
         ErrorCode::AiChangesOff,
         ErrorCode::DeployFailed,
+        ErrorCode::SteamRunning,
+        ErrorCode::SteamUnavailable,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -109,6 +115,8 @@ impl ErrorCode {
             ErrorCode::PlanExpired => "plan.expired",
             ErrorCode::AiChangesOff => "ai.changes_off",
             ErrorCode::DeployFailed => "deploy.failed",
+            ErrorCode::SteamRunning => "steam.running",
+            ErrorCode::SteamUnavailable => "steam.unavailable",
         }
     }
 
@@ -138,6 +146,8 @@ impl ErrorCode {
             ErrorCode::PlanExpired => "The plan is more than 10 minutes old.",
             ErrorCode::AiChangesOff => "AI tools may read and plan, but changes from them are turned off in Settings.",
             ErrorCode::DeployFailed => "The framework's deploy ran and reported failure.",
+            ErrorCode::SteamRunning => "Steam is running, so its settings can't be changed.",
+            ErrorCode::SteamUnavailable => "Steam, a signed-in Steam account, or its settings can't be found or read.",
         }
     }
 
@@ -179,6 +189,10 @@ impl ErrorCode {
             ErrorCode::DeployFailed => {
                 "Read the deploy report (vmm deploy-report): its errors and the log name the mod or file that failed."
             }
+            ErrorCode::SteamRunning => "Exit Steam completely (Steam menu > Exit), then try again.",
+            ErrorCode::SteamUnavailable => {
+                "Check that Steam is installed and you have signed in on this PC at least once."
+            }
         }
     }
 
@@ -189,7 +203,7 @@ impl ErrorCode {
         match self {
             ErrorCode::Usage => 2,
             ErrorCode::ConfigChangedMeanwhile => 4,
-            ErrorCode::GameRunning | ErrorCode::DeployRunning => 5,
+            ErrorCode::GameRunning | ErrorCode::DeployRunning | ErrorCode::SteamRunning => 5,
             ErrorCode::DeployFailed => 6,
             ErrorCode::SaveFailed | ErrorCode::Io => 10,
             _ => 3,
@@ -199,7 +213,13 @@ impl ErrorCode {
     /// Whether trying the same thing again later can work without changing
     /// anything first.
     pub fn retryable(self) -> bool {
-        matches!(self, ErrorCode::ConfigChangedMeanwhile | ErrorCode::GameRunning | ErrorCode::DeployRunning)
+        matches!(
+            self,
+            ErrorCode::ConfigChangedMeanwhile
+                | ErrorCode::GameRunning
+                | ErrorCode::DeployRunning
+                | ErrorCode::SteamRunning
+        )
     }
 }
 
