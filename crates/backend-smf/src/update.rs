@@ -222,18 +222,31 @@ pub fn apply(staging: &Path, folder: &Path, backup: &Path) -> Result<usize, VmmE
             // Put back what was replaced, and remove what was new, including
             // the file whose copy failed partway.
             written.push(rel);
-            for done in &written {
-                let saved = backup.join(done);
-                let _ = if saved.is_file() {
-                    copy(&saved, &folder.join(done))
-                } else {
-                    std::fs::remove_file(folder.join(done))
-                };
+            // New files go first, freeing their space for the restores.
+            let (replaced, new): (Vec<&PathBuf>, Vec<&PathBuf>) =
+                written.iter().partition(|done| backup.join(done).is_file());
+            for done in new {
+                let target = folder.join(done);
+                if target.exists() {
+                    let _ = std::fs::remove_file(target);
+                }
             }
-            return Err(VmmError::new(
-                ErrorCode::SaveFailed,
-                format!("Couldn't update {} ({e}). SMF was put back as it was.", rel.display()),
-            ));
+            let not_restored: Vec<String> = replaced
+                .into_iter()
+                .filter(|done| copy(&backup.join(done), &folder.join(done)).is_err())
+                .map(|done| done.display().to_string())
+                .collect();
+            let message = if not_restored.is_empty() {
+                format!("Couldn't update {} ({e}). SMF was put back as it was.", rel.display())
+            } else {
+                format!(
+                    "Couldn't update {} ({e}), and {} could not be put back. Copy them from {} into SMF's folder before deploying.",
+                    rel.display(),
+                    not_restored.join(", "),
+                    backup.display()
+                )
+            };
+            return Err(VmmError::new(ErrorCode::SaveFailed, message));
         }
         written.push(rel);
     }
@@ -327,6 +340,25 @@ mod tests {
         assert!(!smf.join("Load Order Manager").exists());
         assert_eq!(read(&backup.join("Deploy.exe")), "old");
         assert_eq!(read(&backup.join("Load Order Manager/x.exe")), "lom");
+    }
+
+    #[test]
+    fn a_failed_copy_puts_smf_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (staging, folder, backup) = (tmp.path().join("s"), tmp.path().join("f"), tmp.path().join("b"));
+        for d in [&staging, &folder] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(staging.join("a.txt"), "new a").unwrap();
+        std::fs::write(staging.join("m.txt"), "new file").unwrap();
+        std::fs::write(staging.join("zz"), "can't land").unwrap();
+        std::fs::write(folder.join("a.txt"), "old a").unwrap();
+        // A folder where a file must go makes the last copy fail.
+        std::fs::create_dir_all(folder.join("zz")).unwrap();
+        let e = apply(&staging, &folder, &backup).unwrap_err();
+        assert!(e.message.contains("put back as it was"), "{}", e.message);
+        assert_eq!(std::fs::read_to_string(folder.join("a.txt")).unwrap(), "old a");
+        assert!(!folder.join("m.txt").exists());
     }
 
     #[test]
