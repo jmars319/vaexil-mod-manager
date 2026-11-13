@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "game": {
+    "id": "hitman-woa",
+    "name": "HITMAN World of Assassination",
+    "store": "Folder",
+    "folder": "<tmp>/game"
+  },
+  "orderName": "smf",
+  "order": [
+    "A"
+  ],
+  "brokenRules": [],
+  "suggested": [
+    "A"
+  ],
+  "contradictory": []
+}

@@ -1,0 +1,114 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "game": {
+      "$ref": "#/$defs/GameView"
+    },
+    "orderName": {
+      "type": "string",
+      "description": "The order the backend keeps (`smf`)."
+    },
+    "order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Mod ids, first to last. A later mod wins."
+    },
+    "brokenRules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BrokenRuleView"
+      }
+    },
+    "suggested": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "The order that would keep every rule, moving as little as possible.\nAbsent when the rules contradict each other."
+    },
+    "contradictory": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Mods the rules can't order, when they contradict each other."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "game",
+    "orderName",
+    "order",
+    "brokenRules",
+    "contradictory"
+  ],
+  "title": "OrderReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "GameView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A stable id for the game, such as `hitman-woa`."
+        },
+        "name": {
+          "type": "string"
+        },
+        "store": {
+          "type": "string",
+          "description": "Where it was found: Steam, Epic Games, Microsoft Store or Folder."
+        },
+        "folder": {
+          "type": "string",
+          "description": "The game folder."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "store",
+        "folder"
+      ],
+      "description": "A game install VMM found."
+    },
+    "BrokenRuleView": {
+      "type": "object",
+      "properties": {
+        "mod": {
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/$defs/RelationView",
+          "description": "`mod` should load `relation` `other`."
+        },
+        "other": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mod",
+        "relation",
+        "other"
+      ],
+      "description": "An author's ordering rule that the current order breaks."
+    },
+    "RelationView": {
+      "type": "string",
+      "enum": [
+        "before",
+        "after"
+      ]
+    }
+  }
+}

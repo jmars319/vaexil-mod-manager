@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "plan.not_found",
+    "message": "There is no plan “<planId>”. It may have been applied already.",
+    "hint": "Plan the change again and apply the plan id it gives.",
+    "retryable": false,
+    "exitCode": 3
+  }
+}

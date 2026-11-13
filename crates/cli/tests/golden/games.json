@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "games": [
+    {
+      "id": "hitman-woa",
+      "name": "HITMAN World of Assassination",
+      "store": "Folder",
+      "folder": "<tmp>/game"
+    }
+  ]
+}

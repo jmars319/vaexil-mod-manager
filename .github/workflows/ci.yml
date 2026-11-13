@@ -38,10 +38,12 @@ jobs:
       - name: Front ends depend on the engine, not on backends
         shell: bash
         run: |
-          if cargo tree -p vaexil-mod-manager -e normal --depth 1 --locked | grep -E 'vmm-backend-'; then
-            echo "The window depends on a backend crate directly; go through vmm-engine instead." >&2
-            exit 1
-          fi
+          for front in vaexil-mod-manager vmm-cli; do
+            if cargo tree -p "$front" -e normal --depth 1 --locked | grep -E 'vmm-backend-'; then
+              echo "$front depends on a backend crate directly; go through vmm-engine instead." >&2
+              exit 1
+            fi
+          done
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -49,8 +51,21 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      # ADR 0003: the JSON contract is committed under schema/ and must match
+      # the code. A deliberate change regenerates it with `vmm schema --out schema`.
+      - name: The committed JSON schema matches the code
+        shell: bash
+        run: |
+          cargo run --locked -q -p vmm-cli -- schema --out schema > /dev/null
+          if [ -n "$(git status --porcelain -- schema)" ]; then
+            git status --porcelain -- schema
+            git diff -- schema
+            echo "schema/ is out of date: run 'cargo run -p vmm-cli -- schema --out schema' and commit it." >&2
+            exit 1
+          fi
+
       - name: Release build
-        run: cargo build --release --locked -p vaexil-mod-manager
+        run: cargo build --release --locked -p vaexil-mod-manager -p vmm-cli
 
       # The click smoke test deploys with this stand-in for SMF's Deploy.exe.
       - name: Build the stand-in Deploy.exe
@@ -71,6 +86,16 @@ jobs:
       - name: Smoke test, real mouse clicks
         shell: pwsh
         run: ./scripts/smoke-mouse-clicks.ps1
+
+      # A failed click check saves a picture of the app's window.
+      - name: Upload smoke screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-screenshots
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: ignore
+          retention-days: 7
 
   security:
     name: Dependency policy

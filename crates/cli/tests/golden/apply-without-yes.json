@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "usage.invalid",
+    "message": "Applying a plan changes your mods. Run `vmm apply <planId> --yes` to confirm. Nothing was changed.",
+    "hint": "Run `vmm help` for the commands. Changes need --yes.",
+    "retryable": false,
+    "exitCode": 2
+  }
+}

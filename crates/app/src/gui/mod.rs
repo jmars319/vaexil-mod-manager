@@ -7,6 +7,7 @@
 //! `vmm-engine`; this module only turns the engine's answers into the window.
 
 mod order_view;
+mod settings;
 mod sheet;
 mod view;
 mod wire;
@@ -67,6 +68,7 @@ pub fn run() -> i32 {
     let _deploy_timer = wire::wire_play(&ui, &state);
     wire::wire_setups(&ui, &state);
     wire::wire_pass(&ui, &state);
+    settings::wire_settings(&ui);
     refresh(&ui, &state);
 
     {

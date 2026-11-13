@@ -1,0 +1,115 @@
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "setEnabled"
+        },
+        "mod": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "op",
+        "mod",
+        "enabled"
+      ],
+      "description": "Turn a mod on (placed where its rules want it) or off."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "setOptions"
+        },
+        "mod": {
+          "type": "string"
+        },
+        "chosen": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "op",
+        "mod",
+        "chosen"
+      ],
+      "description": "Choose exactly these options of a mod, by their `value`s."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "setKind"
+        },
+        "mod": {
+          "type": "string"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "op",
+        "mod"
+      ],
+      "description": "Set the type shown for a mod, or with no `kind`, go back to the type\nworked out from its files."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "reorder"
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "op",
+        "order"
+      ],
+      "description": "A new load order. It must hold exactly the mods that are on at that\npoint of the plan."
+    }
+  ],
+  "description": "One change to make. Every change is planned first and applied by its plan.",
+  "title": "Change",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ModKind": {
+      "type": "string",
+      "enum": [
+        "gameplay",
+        "models-textures",
+        "sound",
+        "dialogue",
+        "ui",
+        "text",
+        "other"
+      ],
+      "description": "What a mod mostly changes, for grouping the Mods view. Information only:\nit never affects what the framework loads."
+    }
+  }
+}

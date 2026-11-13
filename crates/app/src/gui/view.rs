@@ -199,8 +199,20 @@ mod tests {
     struct Fake(Inspection);
 
     impl Backend for Fake {
+        fn id(&self) -> &'static str {
+            "smf"
+        }
         fn name(&self) -> &'static str {
             "Simple Mod Framework"
+        }
+        fn capabilities(&self) -> vmm_core::schema::Capabilities {
+            unreachable!("the view doesn't show capabilities")
+        }
+        fn native_mods(&self) -> vmm_core::schema::NativeMods {
+            unreachable!("the view doesn't show native mods")
+        }
+        fn state_files(&self, _: &GameInstall, _: &[String]) -> Vec<PathBuf> {
+            unreachable!("the view never plans")
         }
         fn inspect(&self, _: &GameInstall) -> Inspection {
             self.0.clone()
@@ -210,6 +222,37 @@ mod tests {
         }
         fn set_options(&self, _: &GameInstall, _: &str, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")
+        }
+        fn resolve_options(
+            &self,
+            _: &GameInstall,
+            _: &str,
+            _: &[String],
+            _: &[String],
+        ) -> Result<Vec<String>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
+        fn stored_options(
+            &self,
+            _: &GameInstall,
+        ) -> Result<std::collections::BTreeMap<String, Vec<String>>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
+        fn enable_defaults(
+            &self,
+            _: &GameInstall,
+            _: &str,
+            _: &[String],
+        ) -> Result<Option<Vec<String>>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
+        fn mods_with(
+            &self,
+            _: &GameInstall,
+            _: &[String],
+            _: &std::collections::BTreeMap<String, Vec<String>>,
+        ) -> Result<Vec<vmm_core::backend::ModEntry>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
         }
         fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, vmm_core::error::VmmError> {
             unreachable!("the view never writes")

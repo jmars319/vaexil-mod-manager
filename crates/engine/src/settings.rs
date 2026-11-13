@@ -11,6 +11,11 @@ use vmm_core::error::{ErrorCode, VmmError};
 
 const FILE: &str = "settings.json";
 
+/// Where the settings file is, in the data folder `dir`.
+pub fn path(dir: &Path) -> PathBuf {
+    dir.join(FILE)
+}
+
 /// The settings, plus every key this version does not know, so a newer
 /// version's settings survive a save by this one.
 #[derive(Debug, Clone, Default, PartialEq)]

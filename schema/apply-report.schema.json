@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "planId": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PlanStep"
+      }
+    },
+    "needsDeploy": {
+      "type": "boolean",
+      "description": "Whether the game needs a deploy for the changes to take effect."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "planId",
+    "steps",
+    "needsDeploy"
+  ],
+  "title": "ApplyReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "PlanStep": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "What the step does, in plain words."
+        },
+        "changesSomething": {
+          "type": "boolean",
+          "description": "False when the game is already that way, so the step writes nothing."
+        }
+      },
+      "required": [
+        "description",
+        "changesSomething"
+      ]
+    }
+  }
+}

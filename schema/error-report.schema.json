@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "error": {
+      "$ref": "#/$defs/ErrorBody"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "error"
+  ],
+  "description": "What every interface returns instead of a result when something fails.",
+  "title": "ErrorReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ErrorBody": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable code, such as `config.changed_meanwhile`."
+        },
+        "message": {
+          "type": "string",
+          "description": "What went wrong and what was (not) changed, for people."
+        },
+        "hint": {
+          "type": "string",
+          "description": "What to do about it."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether trying again later, without changing anything, can work."
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The process exit code `vmm` uses for this error."
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "hint",
+        "retryable",
+        "exitCode"
+      ]
+    }
+  }
+}

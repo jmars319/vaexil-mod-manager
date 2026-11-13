@@ -25,6 +25,7 @@ use vmm_core::backend::{
 };
 use vmm_core::error::{ErrorCode as C, VmmError};
 use vmm_core::game::GameInstall;
+use vmm_core::schema::{Capabilities, DeployMethod, NativeMods, NativeModsStatus};
 
 /// A file SMF itself keeps in `Mods`; it is not a mod.
 const MANAGED_MARKER: &str = "Managed by SMF, do not touch";
@@ -64,8 +65,43 @@ impl Smf {
 }
 
 impl Backend for Smf {
+    fn id(&self) -> &'static str {
+        "smf"
+    }
+
     fn name(&self) -> &'static str {
         "Simple Mod Framework"
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            orders: vec!["smf".into()],
+            options: true,
+            deploy: DeployMethod::ExternalTool,
+            needs_deploy: true,
+        }
+    }
+
+    fn native_mods(&self) -> NativeMods {
+        NativeMods {
+            status: NativeModsStatus::None,
+            explanation: "HITMAN World of Assassination has no mod system of its own. Every mod goes through SMF, \
+                          and SMF's Deploy.exe builds the game's patch files."
+                .into(),
+        }
+    }
+
+    fn state_files(&self, game: &GameInstall, mods: &[String]) -> Vec<PathBuf> {
+        let Some(folder) = find_folder(&game.root) else { return vec![] };
+        let mut files = vec![folder.join("config.json")];
+        for id in mods {
+            if let Ok(m) = self.find_mod(&folder, id)
+                && m.badge.as_deref() != Some("RPKG")
+            {
+                files.push(m.folder.join("manifest.json"));
+            }
+        }
+        files
     }
 
     fn inspect(&self, game: &GameInstall) -> Inspection {
@@ -124,6 +160,47 @@ impl Backend for Smf {
         write::set_load_order(&folder, order, self.backup_dir.as_deref())
     }
 
+    fn stored_options(&self, game: &GameInstall) -> Result<BTreeMap<String, Vec<String>>, VmmError> {
+        let config = read_config(&smf_folder(game)?)?;
+        // An entry that isn't a list of strings is left out: any write
+        // replaces it, as for a mod with no entry.
+        Ok(config.mod_options.keys().filter_map(|id| Some((id.clone(), config.options_of(id)?))).collect())
+    }
+
+    fn enable_defaults(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        load_order: &[String],
+    ) -> Result<Option<Vec<String>>, VmmError> {
+        let folder = smf_folder(game)?;
+        // As write::set_enabled: defaults only for a mod with no entry.
+        if read_config(&folder)?.mod_options.contains_key(mod_id) {
+            return Ok(None);
+        }
+        let m = self.find_mod(&folder, mod_id)?;
+        if m.problem.is_some() || m.badge.as_deref() == Some("RPKG") {
+            return Ok(None);
+        }
+        let manifest = manifest_of(&m)?;
+        Ok((!manifest.options.is_empty()).then(|| options::default_values(&manifest.options, load_order)))
+    }
+
+    fn mods_with(
+        &self,
+        game: &GameInstall,
+        order: &[String],
+        options: &BTreeMap<String, Vec<String>>,
+    ) -> Result<Vec<ModEntry>, VmmError> {
+        let folder = smf_folder(game)?;
+        let mut config = read_config(&folder)?;
+        config.load_order = order.to_vec();
+        for (id, values) in options {
+            config.mod_options.insert(id.clone(), serde_json::json!(values));
+        }
+        Ok(list_mods(&folder.join("Mods"), &config, &self.kinds).0)
+    }
+
     fn current_setup(&self, game: &GameInstall) -> Result<Setup, VmmError> {
         let folder = smf_folder(game)?;
         let config = read_config(&folder)?;
@@ -168,6 +245,19 @@ impl Backend for Smf {
 
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError> {
         let folder = smf_folder(game)?;
+        let config = read_config(&folder)?;
+        let values = self.resolve_options(game, mod_id, chosen, &config.load_order)?;
+        write::set_options(&folder, mod_id, &values, self.backup_dir.as_deref())
+    }
+
+    fn resolve_options(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        chosen: &[String],
+        load_order: &[String],
+    ) -> Result<Vec<String>, VmmError> {
+        let folder = smf_folder(game)?;
         let m = self.find_mod(&folder, mod_id)?;
         if let Some(problem) = &m.problem {
             return Err(VmmError::new(C::ModUnreadable, format!("{}'s options can't be changed. {problem}", m.name)));
@@ -175,10 +265,7 @@ impl Backend for Smf {
         if m.badge.as_deref() == Some("RPKG") {
             return Err(VmmError::new(C::OptionInvalid, format!("{} is an RPKG mod, which has no options.", m.name)));
         }
-        let manifest = manifest_of(&m)?;
-        let config = read_config(&folder)?;
-        let values = options::validate(&manifest.options, chosen, &config.load_order)?;
-        write::set_options(&folder, mod_id, &values, self.backup_dir.as_deref())
+        options::validate(&manifest_of(&m)?.options, chosen, load_order)
     }
 }
 

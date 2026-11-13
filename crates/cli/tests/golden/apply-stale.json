@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "config.changed_meanwhile",
+    "message": "<tmp>/game/Simple Mod Framework/config.json has changed since the plan was made. Nothing was changed.",
+    "hint": "Read the state again, plan the change again, and apply the new plan.",
+    "retryable": true,
+    "exitCode": 4
+  }
+}

@@ -8,6 +8,7 @@
 //! folder, and runs deploys. Every change it makes to the game's mod
 //! framework goes through the backend, after a backup.
 
+pub mod contract;
 pub mod deploy;
 pub mod host;
 pub mod settings;
@@ -342,7 +343,7 @@ pub fn enabled_order(mods: &[vmm_core::backend::ModEntry]) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::path::Path;
 
     use vmm_core::game::Store;
@@ -350,7 +351,7 @@ mod tests {
     use super::*;
 
     /// A fake game with SMF and three plain mods; the third has options.
-    fn fake_game(root: &Path) -> GameInstall {
+    pub(crate) fn fake_game(root: &Path) -> GameInstall {
         let smf = root.join("Simple Mod Framework");
         std::fs::create_dir_all(root.join("Retail")).unwrap();
         std::fs::write(root.join("Retail/HITMAN3.exe"), b"").unwrap();

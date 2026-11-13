@@ -7,10 +7,26 @@ use std::path::PathBuf;
 
 use crate::error::VmmError;
 use crate::game::GameInstall;
+use crate::schema::{Capabilities, NativeMods};
 
 pub trait Backend {
+    /// A stable id for tools and saved files, such as `smf`.
+    fn id(&self) -> &'static str;
+
     /// The name shown in the window, such as "Simple Mod Framework".
     fn name(&self) -> &'static str;
+
+    /// What the backend can do: its load orders, options, and how it deploys.
+    fn capabilities(&self) -> Capabilities;
+
+    /// How the backend lives alongside the game's own mod system.
+    fn native_mods(&self) -> NativeMods;
+
+    /// The files the backend's settings live in for this install, and the
+    /// description files of `mods` (whose options and defaults a plan
+    /// depends on). A plan records their hashes and applying it refuses if
+    /// any has changed.
+    fn state_files(&self, game: &GameInstall, mods: &[String]) -> Vec<PathBuf>;
 
     /// Reads the framework's state for one game install. Never writes.
     fn inspect(&self, game: &GameInstall) -> Inspection;
@@ -22,6 +38,44 @@ pub trait Backend {
     /// Saves which of a mod's options are chosen, given as their
     /// [`ModOption::value`]s. Returns `false` when nothing changed.
     fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, VmmError>;
+
+    /// The options `set_options` would store for `chosen` if the mods on
+    /// were `load_order`: checked, in the mod's order, with every select
+    /// group filled. Writes nothing; plans use it to describe exactly what
+    /// will be written.
+    fn resolve_options(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        chosen: &[String],
+        load_order: &[String],
+    ) -> Result<Vec<String>, VmmError>;
+
+    /// Every mod's stored options, exactly as stored and in stored order. A
+    /// mod with no stored choice is absent; options shown for it are its
+    /// author's defaults, which the framework does not apply until stored.
+    fn stored_options(&self, game: &GameInstall) -> Result<BTreeMap<String, Vec<String>>, VmmError>;
+
+    /// The options `set_enabled` would store for `mod_id` if the mods on
+    /// were `load_order`: its author's defaults when it has options and no
+    /// stored choice yet, otherwise `None` (nothing is stored). Writes nothing.
+    fn enable_defaults(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        load_order: &[String],
+    ) -> Result<Option<Vec<String>>, VmmError>;
+
+    /// The mods as they would read with `order` as the load order and
+    /// `options` in place of those mods' stored options: their load rules
+    /// then include the rules of those options. Writes nothing; plans use it
+    /// to place a mod exactly where turning it on would.
+    fn mods_with(
+        &self,
+        game: &GameInstall,
+        order: &[String],
+        options: &BTreeMap<String, Vec<String>>,
+    ) -> Result<Vec<ModEntry>, VmmError>;
 
     /// Saves a new load order. It must hold exactly the mods that are on now,
     /// first to last; anything else is refused. Returns `false` when the order
@@ -102,7 +156,21 @@ impl Version {
 
 /// What a mod mostly changes, for grouping the Mods view. Information only:
 /// it never affects what the framework loads.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum ModKind {
     Gameplay,
     ModelsTextures,

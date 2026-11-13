@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "order.mismatch",
+    "message": "A new load order must list each mod that is on at that point exactly once: A, B, C. Nothing was changed.",
+    "hint": "Give every mod that is on exactly once, and no others.",
+    "retryable": false,
+    "exitCode": 3
+  }
+}
