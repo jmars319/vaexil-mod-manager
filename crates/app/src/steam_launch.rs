@@ -106,9 +106,16 @@ pub fn run(args: &[String]) -> i32 {
         None => Vec::new(),
     };
     let engine = Rc::new(Engine::open());
+    // Never start the game while a deploy is writing its files.
+    if let Err(e) = engine.check_no_deploy() {
+        show_message("HITMAN can't start yet", &e.message);
+        return 1;
+    }
     // Without the game found, there is nothing to check: start it as Steam asked.
     let Some(game) = engine.installs().into_iter().next() else { return play(&command) };
-    if engine.up_to_date(&game) == Some(true) {
+    // Up to date, or the user already chose to play without deploying (in
+    // the window or `vmm play --no-deploy`, which hand over through Steam).
+    if engine.take_play_as_is() || engine.up_to_date(&game) == Some(true) {
         return play(&command);
     }
     let blocked = engine.blocker().map(|e| e.message);
@@ -118,7 +125,13 @@ pub fn run(args: &[String]) -> i32 {
     };
     match choose(&reason, blocked.is_none()) {
         Choice::Cancel => 0,
-        Choice::PlayNow => play(&command),
+        Choice::PlayNow => match engine.check_no_deploy() {
+            Ok(()) => play(&command),
+            Err(e) => {
+                show_message("HITMAN can't start yet", &e.message);
+                1
+            }
+        },
         Choice::Deploy => match deploy(&engine, &game) {
             Ok(()) => play(&command),
             Err(why) => {

@@ -258,8 +258,9 @@ impl Engine {
         let text = std::fs::read_to_string(&account.localconfig)
             .map_err(|e| unavailable(format!("Couldn't read Steam's settings: {e}")))?;
         let current = steam::get_launch_options(&text, STEAM_APP_ID).map_err(|e| unavailable(e.to_string()))?;
-        let message = if steam::is_ours(&current) {
-            // Ours (this exe or an older path of it): put the previous value back.
+        // Exactly what the app set: put the previous value back. Anything
+        // else, even a value that still starts the app, was edited since.
+        let message = if current == hook.applied {
             let updated = steam::set_launch_options(&text, STEAM_APP_ID, &hook.previous)
                 .map_err(|e| unavailable(e.to_string()))?;
             backup(data, account.account_id, &text)?;
@@ -331,6 +332,22 @@ mod tests {
         engine.disconnect_steam_play_in(&root, false).unwrap();
         assert_eq!(std::fs::read(&localconfig).unwrap(), before);
         assert!(engine.steam_hook().is_none());
+    }
+
+    #[test]
+    fn our_value_with_arguments_added_by_hand_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let localconfig = fake_steam(&tmp.path().join("steam"), "");
+        let root = SteamRoot::new(tmp.path().join("steam"));
+        let engine = Engine::with_data_dir(Some(tmp.path().join("data")));
+        let exe = Path::new(r"C:\VMM\vaexil-mod-manager.exe");
+        engine.connect_steam_play_in(&root, exe, false).unwrap();
+        let edited = format!("{} -skip_launcher", steam::wrapper_launch_options(exe));
+        let text = std::fs::read_to_string(&localconfig).unwrap();
+        std::fs::write(&localconfig, steam::set_launch_options(&text, STEAM_APP_ID, &edited).unwrap()).unwrap();
+        assert!(engine.disconnect_steam_play_in(&root, false).unwrap().contains("left as they are"));
+        let text = std::fs::read_to_string(&localconfig).unwrap();
+        assert_eq!(steam::get_launch_options(&text, STEAM_APP_ID).unwrap(), edited);
     }
 
     #[test]
