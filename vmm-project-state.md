@@ -17,7 +17,7 @@ The working state around the plan page and the docs. The plan page holds the roa
 
 - Stage 00 (direction, ADR-0034) and stage 01 (repo, read-only first window, #1) are done.
 - Stage 02, in progress since 2026-11-13, in four PRs:
-  1. Mods view grouped by type, with on/off switches. #12, in review. The app's first write.
+  1. Mods view grouped by type, with on/off switches. #12, merged 2026-11-13 as 118506b. The app's first write.
   2. Mod options sheet (`modOptions`) and a type override kept in the app's own settings.
   3. Load order view: drag, Auto-sort by `loadBefore`/`loadAfter`, broken-rule warnings, "overridden by" markers in the Mods view.
   4. Setups, Play (deploy if changed, then start HITMAN) and Deploy, both blocked while HITMAN runs.
@@ -25,9 +25,9 @@ The working state around the plan page and the docs. The plan page holds the roa
 
 ## Active Task State & Known Regressions
 
-- `main` is at #11 (SMF 2.33.45 recognised). #12 is rebased onto it. Its three Codex review findings (no backup without an app data folder, concurrent writers, a broken enabled mod that couldn't be turned off) were fixed in f84709f, answered and resolved. The owner approved merging #12, then this file (#13), once CI is green.
+- `main` is at #12 (118506b): grouped Mods view and switches. Before merging, its three Codex review findings were fixed, answered and resolved: no backup without an app data folder, concurrent writers, and a broken enabled mod that couldn't be turned off. Next is stage 02's PR 2, mod options and the type override.
 - Merging needs every review thread resolved (branch protection: conversation resolution and linear history). GitHub auto-merge is off for this repo. Codex reviews each push.
-- Installed on JASON-PC: 0.1.0 (read-only, from before stage 02). Rebuild and reinstall after #12 merges.
+- Installed on JASON-PC: built from 118506b with `scripts/package.ps1` and installed per-user with the Inno installer (`/VERYSILENT`) on 2026-11-13. The installed exe's SHA-256 matches the build. Still versioned 0.1.0, because nothing is released. Checked against the real install without clicking: SMF 2.33.45, 15 mods, 10 on, no orphaned load-order ids.
 - HITMAN folder (2026-11-12): official SMF 2.33.45 applied the way SMF's updater does, Vortex leftovers removed, the owner's 10-mod `config.json` restored. Test deploy took 30m32s with 0 errors. The pre-reinstall backup is in `Downloads\hitman-smf-backup-2026-11-12` until the owner has checked the game.
 - Known gaps:
   - Type guesses put Lighting Ultimate and the glasses fix in Gameplay, until the override in PR 2.
