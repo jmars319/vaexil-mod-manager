@@ -2,6 +2,7 @@
 
 mod gui;
 mod platform;
+mod settings;
 
 slint::include_modules!();
 

@@ -23,14 +23,15 @@ Enforcement:
 
 | What | When | How |
 | --- | --- | --- |
-| SMF's `config.json` | A mod's switch is used in the Mods view. | Only `loadOrder` changes: on appends the mod's id, off removes it. A mod with options that has never had any chosen gets its author's defaults in `modOptions`, as SMF's own Mod Manager does. Every other key, and their order, is kept. The file is written as plain JSON, which SMF reads like the JSON5 it writes itself. |
+| SMF's `config.json` | A mod's switch is used, or Save in a mod's edit sheet with its options changed. | A switch changes only `loadOrder`: on appends the mod's id, off removes it. A mod with options that has never had any chosen gets its author's defaults in `modOptions` (leaving out options whose required mods are off), as SMF's own Mod Manager does. Save replaces that mod's `modOptions` entry with the choice, checked against its manifest the way SMF checks it: only checkbox and select options, one per select group, none whose required mods are off. Every other key, and their order, is kept. The file is written as plain JSON, which SMF reads like the JSON5 it writes itself. |
 | `config.json.vmm-<process id>.tmp` in SMF's folder | During that write, for a moment. | The new file is written here first, then renamed over `config.json` in one step, so SMF never reads half a file. Just before the rename `config.json` is read again; if another program (SMF's own Mod Manager, a second copy of this app) changed it meanwhile, nothing is written and the window says to try again. The temporary file is removed whenever the write does not complete. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\settings.json` | Save in a mod's edit sheet with its type changed. | The app's own settings: the types you chose, by mod id. Never read by SMF. Written to `settings.json.<process id>.tmp` and renamed over. Keys this version does not know are kept. If the file can't be read, it is never overwritten and type changes are off, with a note in the window. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups\config-<time>.json` | Before every change to `config.json`. | A copy of the file as it was. The newest 20 are kept. If the copy cannot be made, or Windows does not say where `%LOCALAPPDATA%` is, `config.json` is not changed. |
 
 Enforcement:
 
 - All writing is in one module, `crates/core/src/smf/write.rs`, behind `Framework::set_enabled`. Tests cover key order, other keys, JSON5 input, defaults, the backup, a failed backup stopping the write, and a file it cannot read being left alone.
-- The mouse-click smoke test runs the real window against a throwaway game folder and checks that a click changes only the load order and leaves a backup.
+- The mouse-click smoke test runs the real window against a throwaway game folder and checks that a click changes only the load order and leaves a backup, and that Save in the edit sheet stores the clicked option.
 - `VAEXIL_MOD_MANAGER_DATA` moves the app's folder for tests, so they never write to the user's profile.
 
 ## Processes

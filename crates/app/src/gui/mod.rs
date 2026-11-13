@@ -1,10 +1,13 @@
 //! The main window. It finds HITMAN and its SMF, shows the mods grouped by
-//! kind, refreshes every few seconds, and turns mods on or off in SMF's
-//! `config.json` when a switch is used.
+//! kind, refreshes every few seconds, turns mods on or off in SMF's
+//! `config.json` when a switch is used, and opens the edit sheet for a mod's
+//! type and options.
 
+mod sheet;
 mod view;
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -14,7 +17,8 @@ use vmm_core::framework::Framework;
 use vmm_core::game::GameInstall;
 use vmm_core::smf::Smf;
 
-use crate::{AppWindow, Message, ModRow, Ui};
+use crate::settings::Settings;
+use crate::{AppWindow, EditState, Message, ModRow, OptCheck, OptSelect, Ui};
 
 pub fn run() -> i32 {
     let ui = match AppWindow::new() {
@@ -35,12 +39,31 @@ pub fn run() -> i32 {
     // it reads but never writes.
     let data_dir = crate::platform::data_dir();
     let can_write = data_dir.is_some();
-    let smf = Rc::new(match data_dir {
+    let smf = Rc::new(match &data_dir {
         Some(dir) => Smf::with_backups(dir.join("config-backups")),
         None => Smf::default(),
     });
-    let state = Rc::new(State { smf, rows, notes, game: RefCell::default(), error: RefCell::default() });
+    let settings = match &data_dir {
+        Some(dir) => Settings::load(dir),
+        None => Ok(Settings::default()),
+    };
+    let state = Rc::new(State {
+        smf,
+        rows,
+        notes,
+        game: RefCell::default(),
+        error: RefCell::default(),
+        data_dir,
+        settings: RefCell::new(settings),
+        sheet: RefCell::default(),
+        checks: Rc::new(VecModel::default()),
+        selects: Rc::new(VecModel::default()),
+    });
+    let es = ui.global::<EditState>();
+    es.set_checks(ModelRc::from(state.checks.clone()));
+    es.set_selects(ModelRc::from(state.selects.clone()));
     refresh(&ui, &state);
+    wire_sheet(&ui, &state);
 
     {
         let weak = ui.as_weak();
@@ -90,6 +113,149 @@ struct State {
     game: RefCell<Option<GameInstall>>,
     /// The last change that failed, shown until the next one succeeds.
     error: RefCell<Option<String>>,
+    data_dir: Option<PathBuf>,
+    /// The app's own settings, or why they can't be read. Unreadable
+    /// settings are never overwritten.
+    settings: RefCell<Result<Settings, String>>,
+    /// The open edit sheet, if any.
+    sheet: RefCell<Option<sheet::EditSheet>>,
+    checks: Rc<VecModel<OptCheck>>,
+    selects: Rc<VecModel<OptSelect>>,
+}
+
+/// The edit sheet: opened from a row, changed in place, written on Save.
+fn wire_sheet(ui: &AppWindow, state: &Rc<State>) {
+    let g = ui.global::<Ui>();
+    let es = ui.global::<EditState>();
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        g.on_edit(move |id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let game = state.game.borrow().clone();
+            let Some(game) = game else { return };
+            let Some(m) = state.smf.inspect(&game).mods.into_iter().find(|m| m.id == id.as_str()) else { return };
+            let chosen = state.settings.borrow().as_ref().ok().and_then(|s| s.kind_overrides.get(&m.id).copied());
+            let s = sheet::EditSheet::new(&m, m.kind, chosen);
+            show_sheet(&ui, &state, &s, "");
+            *state.sheet.borrow_mut() = Some(s);
+            ui.global::<Ui>().set_sheet("edit".into());
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        es.on_cancel(move || {
+            *state.sheet.borrow_mut() = None;
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<Ui>().set_sheet("".into());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        es.on_check(move |i, on| {
+            if let Some(s) = state.sheet.borrow_mut().as_mut()
+                && let Some(c) = s.checks.get_mut(i as usize)
+            {
+                c.checked = on;
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        es.on_select(move |i, index| {
+            if let Some(s) = state.sheet.borrow_mut().as_mut()
+                && let Some(sel) = s.selects.get_mut(i as usize)
+                && (index as usize) < sel.values.len()
+            {
+                sel.index = index as usize;
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        es.on_kind(move |index| {
+            if let Some(s) = state.sheet.borrow_mut().as_mut() {
+                s.kind_index = index.max(0) as usize;
+            }
+        });
+    }
+    {
+        let (weak, state) = (ui.as_weak(), state.clone());
+        es.on_save(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(s) = state.sheet.borrow().clone() else { return };
+            match save_sheet(&state, &s) {
+                Ok(()) => {
+                    *state.sheet.borrow_mut() = None;
+                    ui.global::<Ui>().set_sheet("".into());
+                    refresh(&ui, &state);
+                }
+                Err(e) => ui.global::<EditState>().set_error(e.into()),
+            }
+        });
+    }
+}
+
+fn show_sheet(ui: &AppWindow, state: &State, s: &sheet::EditSheet, error: &str) {
+    let es = ui.global::<EditState>();
+    es.set_title(s.title.clone().into());
+    es.set_subtitle(s.subtitle.clone().into());
+    es.set_kinds(ModelRc::new(VecModel::from(
+        s.kind_labels.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>(),
+    )));
+    es.set_kind_index(s.kind_index as i32);
+    let settings_error = state.settings.borrow().as_ref().err().cloned();
+    es.set_kind_enabled(settings_error.is_none() && state.data_dir.is_some());
+    es.set_note(settings_error.unwrap_or_default().into());
+    state.checks.set_vec(
+        s.checks
+            .iter()
+            .map(|c| OptCheck {
+                label: c.label.clone().into(),
+                detail: c.detail.clone().into(),
+                checked: c.checked,
+                enabled: c.enabled,
+            })
+            .collect::<Vec<_>>(),
+    );
+    state.selects.set_vec(
+        s.selects
+            .iter()
+            .map(|sel| OptSelect {
+                group: sel.group.clone().into(),
+                labels: ModelRc::new(VecModel::from(
+                    sel.labels.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>(),
+                )),
+                index: sel.index as i32,
+            })
+            .collect::<Vec<_>>(),
+    );
+    es.set_error(error.into());
+}
+
+/// Writes what changed: the options to the framework, the type to the app's
+/// own settings. Options go first, so a refused choice changes nothing.
+fn save_sheet(state: &State, s: &sheet::EditSheet) -> Result<(), String> {
+    if s.options_changed() {
+        let game = state.game.borrow().clone().ok_or("HITMAN is no longer where it was. Nothing was changed.")?;
+        if state.data_dir.is_none() {
+            return Err("Windows didn't say where your local app data folder is (%LOCALAPPDATA%), so there is \
+                        nowhere to keep a copy of SMF's config.json. Nothing was changed."
+                .into());
+        }
+        state.smf.set_options(&game, &s.mod_id, &s.chosen())?;
+    }
+    if s.kind_changed() {
+        let dir = state.data_dir.clone().ok_or("There is no folder to keep the type in. The type was not changed.")?;
+        let mut settings = state.settings.borrow().clone()?;
+        match s.kind() {
+            Some(k) => settings.kind_overrides.insert(s.mod_id.clone(), k),
+            None => settings.kind_overrides.remove(&s.mod_id),
+        };
+        settings.save(&dir)?;
+        *state.settings.borrow_mut() = Ok(settings);
+    }
+    Ok(())
 }
 
 fn refresh(ui: &AppWindow, state: &State) {
@@ -98,7 +264,8 @@ fn refresh(ui: &AppWindow, state: &State) {
         None => vmm_core::game::find_installs(&crate::platform::sources()),
     };
     *state.game.borrow_mut() = installs.first().cloned();
-    let v = view::build(&installs, state.smf.as_ref());
+    let kinds = state.settings.borrow().as_ref().map(|s| s.kind_overrides.clone()).unwrap_or_default();
+    let v = view::build(&installs, state.smf.as_ref(), &kinds);
     let g = ui.global::<Ui>();
     g.set_screen(match v.screen {
         view::Screen::Mods => "mods".into(),
@@ -123,12 +290,17 @@ fn refresh(ui: &AppWindow, state: &State) {
             badge: r.badge.into(),
             problem: r.problem.into(),
             can_toggle: r.can_toggle,
+            can_edit: r.can_edit,
         })
         .collect();
     sync(&state.rows, fresh);
     let error = state.error.borrow().clone().map(|text| Message { text: text.into(), error: true });
-    let notes =
-        error.into_iter().chain(v.notes.into_iter().map(|n| Message { text: SharedString::from(n), error: false }));
+    let settings_error =
+        state.settings.borrow().as_ref().err().map(|text| Message { text: text.clone().into(), error: false });
+    let notes = error
+        .into_iter()
+        .chain(settings_error)
+        .chain(v.notes.into_iter().map(|n| Message { text: SharedString::from(n), error: false }));
     sync(&state.notes, notes.collect());
 }
 

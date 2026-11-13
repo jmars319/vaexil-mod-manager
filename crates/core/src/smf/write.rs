@@ -1,12 +1,14 @@
-//! The only code in the core that writes: turning a mod on or off in SMF's
-//! `config.json`, the way SMF's own Mod Manager does (`modList/+page.svelte`
-//! and `getConfig` in `lib/utils.ts`, SMF 2.33.45).
+//! The only code in the core that writes: SMF's `config.json`, changed the
+//! way SMF's own Mod Manager changes it (`modList/+page.svelte`,
+//! `settings/+page.svelte` and `getConfig` in `lib/utils.ts`, SMF 2.33.45).
 //!
 //! - On appends the mod's id to `loadOrder`. A mod with options and no entry
 //!   in `modOptions` gets the options its author marked `enabledByDefault`,
 //!   which SMF's Mod Manager fills in on its next read. `Deploy.exe` applies
 //!   no options at all for a mod without an entry.
 //! - Off removes the id from `loadOrder` and leaves its options, as SMF does.
+//! - Saving options replaces the mod's `modOptions` entry with the checked
+//!   choice (see [`super::options::validate`]).
 //! - Every other key, and the order of keys, is kept as it was.
 //!
 //! The previous file is copied to the backup folder before each write, and
@@ -25,24 +27,6 @@ pub const BACKUPS_KEPT: usize = 20;
 /// The new file's name while it is written. Each process uses its own.
 fn temp_name() -> String {
     format!("config.json.vmm-{}.tmp", std::process::id())
-}
-
-/// The options SMF selects when a mod is first turned on: checkbox and
-/// select options marked `enabledByDefault`, stored as SMF stores them
-/// (`name` for a checkbox, `group:name` for a select).
-pub fn default_options(options: &[Value]) -> Vec<String> {
-    options
-        .iter()
-        .filter(|o| o.get("enabledByDefault").and_then(Value::as_bool).unwrap_or(false))
-        .filter_map(|o| {
-            let name = o.get("name")?.as_str()?;
-            match o.get("type")?.as_str()? {
-                "checkbox" => Some(name.to_string()),
-                "select" => Some(format!("{}:{name}", o.get("group")?.as_str()?)),
-                _ => None,
-            }
-        })
-        .collect()
 }
 
 /// Changes `config` in memory. `options` is `None` for a mod without options.
@@ -75,8 +59,26 @@ pub fn apply(config: &mut Value, mod_id: &str, enabled: bool, options: Option<&[
     Ok(true)
 }
 
-/// Reads `config.json`, applies the change and writes it back. The text is
-/// JSON5 as SMF writes it; the result is plain JSON, which SMF reads the same.
+/// Sets a mod's `modOptions` entry to `values`. Returns whether it changed.
+pub fn apply_options(config: &mut Value, mod_id: &str, values: &[String]) -> Result<bool, String> {
+    let Some(root) = config.as_object_mut() else {
+        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+    };
+    let all = root.entry("modOptions").or_insert_with(|| Value::Object(Map::new()));
+    let Some(all) = all.as_object_mut() else {
+        return Err(
+            "The mod options in SMF's config.json are not a list per mod. Fix or reset them in SMF first.".into()
+        );
+    };
+    let new = Value::Array(values.iter().cloned().map(Value::String).collect());
+    if all.get(mod_id) == Some(&new) {
+        return Ok(false);
+    }
+    all.insert(mod_id.to_string(), new);
+    Ok(true)
+}
+
+/// Turns a mod on or off in `config.json`. See [`update`].
 pub fn set_enabled(
     smf_folder: &Path,
     mod_id: &str,
@@ -84,11 +86,33 @@ pub fn set_enabled(
     options: Option<&[String]>,
     backup_dir: Option<&Path>,
 ) -> Result<bool, String> {
+    update(smf_folder, backup_dir, |config| apply(config, mod_id, enabled, options))
+}
+
+/// Saves a mod's chosen options in `config.json`. See [`update`].
+pub fn set_options(
+    smf_folder: &Path,
+    mod_id: &str,
+    values: &[String],
+    backup_dir: Option<&Path>,
+) -> Result<bool, String> {
+    update(smf_folder, backup_dir, |config| apply_options(config, mod_id, values))
+}
+
+/// Reads `config.json`, applies `change` and writes the result back, after a
+/// backup. The text is JSON5 as SMF writes it; the result is plain JSON,
+/// which SMF reads the same. Nothing is written when `change` reports no
+/// change.
+pub fn update(
+    smf_folder: &Path,
+    backup_dir: Option<&Path>,
+    change: impl FnOnce(&mut Value) -> Result<bool, String>,
+) -> Result<bool, String> {
     let path = smf_folder.join("config.json");
     let original = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
     let mut config: Value = json5::from_str(original.trim_start_matches('\u{feff}'))
         .map_err(|e| format!("SMF's config.json is not valid JSON ({e}). Fix or reset it in SMF before continuing."))?;
-    if !apply(&mut config, mod_id, enabled, options)? {
+    if !change(&mut config)? {
         return Ok(false);
     }
     let mut text = Vec::new();
@@ -223,7 +247,7 @@ mod tests {
             { "name": "Gloves", "group": "Hands", "type": "select", "enabledByDefault": false },
             { "name": "Needs X", "type": "requirement", "enabledByDefault": true },
         ]);
-        let defaults = default_options(manifest_options.as_array().unwrap());
+        let defaults = super::super::options::default_values(manifest_options.as_array().unwrap(), &[]);
         let tmp = folder_with("{ \"loadOrder\": [] }");
         assert!(set_enabled(tmp.path(), "M", true, Some(&defaults), None).unwrap());
         assert_eq!(read(tmp.path())["modOptions"]["M"], serde_json::json!(["Darker", "Hands:Bare hands"]));
@@ -256,6 +280,23 @@ mod tests {
         assert!(names.contains(&"unrelated.txt".to_string()));
         let newest = names.iter().filter(|n| n.starts_with("config-")).max().unwrap();
         assert_eq!(std::fs::read_to_string(backups.join(newest)).unwrap(), SMF_WRITTEN);
+    }
+
+    #[test]
+    fn saving_options_replaces_only_that_entry() {
+        let tmp = folder_with(SMF_WRITTEN);
+        let backups = tmp.path().join("backups");
+        let values = vec!["Darker".to_string(), "Hands:Gloves".to_string()];
+        assert!(set_options(tmp.path(), "B", &values, Some(&backups)).unwrap());
+        assert!(!set_options(tmp.path(), "B", &values, Some(&backups)).unwrap());
+        let c = read(tmp.path());
+        assert_eq!(c["modOptions"]["B"], serde_json::json!(["Darker", "Hands:Gloves"]));
+        assert_eq!(c["loadOrder"], serde_json::json!(["A", "B"]));
+        assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 1);
+
+        let tmp = folder_with("{ loadOrder: [] }");
+        assert!(set_options(tmp.path(), "New", &[], None).unwrap());
+        assert_eq!(read(tmp.path())["modOptions"]["New"], serde_json::json!([]));
     }
 
     #[test]

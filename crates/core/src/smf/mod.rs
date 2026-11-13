@@ -1,14 +1,15 @@
 //! Simple Mod Framework, read through the files SMF documents for its users:
-//! `config.json`, the `Mods` folder and each mod's `manifest.json`. The one
-//! write, turning a mod on or off in `config.json`, lives in [`write`].
-//! Nothing here runs SMF.
+//! `config.json`, the `Mods` folder and each mod's `manifest.json`. The only
+//! writes, to `config.json` (a mod on or off, a mod's options), live in
+//! [`write`]. Nothing here runs SMF.
 
 mod kind;
+pub mod options;
 mod releases;
 pub mod write;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -93,22 +94,44 @@ impl Framework for Smf {
         let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
         let mut options = None;
         if enabled {
-            let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
-            let m = mods
-                .iter()
-                .find(|m| m.id == mod_id)
-                .ok_or_else(|| format!("\"{mod_id}\" is no longer in SMF's Mods folder."))?;
+            let m = self.find_mod(&folder, mod_id)?;
             if let Some(problem) = &m.problem {
                 return Err(format!("{} can't be turned on. {problem}", m.name));
             }
             if m.badge.as_deref() != Some("RPKG") {
                 let manifest = read_manifest(&m.folder.join("manifest.json"))?;
                 if !manifest.options.is_empty() {
-                    options = Some(write::default_options(&manifest.options));
+                    let config = read_config(&folder)?;
+                    options = Some(options::default_values(&manifest.options, &config.load_order));
                 }
             }
         }
         write::set_enabled(&folder, mod_id, enabled, options.as_deref(), self.backup_dir.as_deref())
+    }
+
+    fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        let m = self.find_mod(&folder, mod_id)?;
+        if let Some(problem) = &m.problem {
+            return Err(format!("{}'s options can't be changed. {problem}", m.name));
+        }
+        if m.badge.as_deref() == Some("RPKG") {
+            return Err(format!("{} is an RPKG mod, which has no options.", m.name));
+        }
+        let manifest = read_manifest(&m.folder.join("manifest.json"))?;
+        let config = read_config(&folder)?;
+        let values = options::validate(&manifest.options, chosen, &config.load_order)?;
+        write::set_options(&folder, mod_id, &values, self.backup_dir.as_deref())
+    }
+}
+
+impl Smf {
+    /// The mod in SMF's Mods folder with this id.
+    fn find_mod(&self, folder: &Path, mod_id: &str) -> Result<ModEntry, String> {
+        let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
+        mods.into_iter()
+            .find(|m| m.id == mod_id)
+            .ok_or_else(|| format!("\"{mod_id}\" is no longer in SMF's Mods folder."))
     }
 }
 
@@ -131,6 +154,17 @@ pub fn find_folder(game_root: &Path) -> Option<PathBuf> {
 pub struct Config {
     #[serde(rename = "loadOrder", default)]
     pub load_order: Vec<String>,
+    /// Each mod's chosen options. Read loosely: an entry that is not a list
+    /// of strings counts as no entry.
+    #[serde(rename = "modOptions", default)]
+    pub mod_options: BTreeMap<String, serde_json::Value>,
+}
+
+impl Config {
+    fn options_of(&self, mod_id: &str) -> Option<Vec<String>> {
+        let list = self.mod_options.get(mod_id)?.as_array()?;
+        list.iter().map(|v| v.as_str().map(str::to_string)).collect()
+    }
 }
 
 pub fn read_config(folder: &Path) -> Result<Config, String> {
@@ -237,7 +271,7 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
             }
             continue;
         }
-        mods.push(read_mod(&path, &file_name, kinds));
+        mods.push(read_mod(&path, &file_name, kinds, config));
     }
     for m in &mut mods {
         m.load_position = config.load_order.iter().position(|id| *id == m.id).map(|i| i + 1);
@@ -258,6 +292,7 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
             badge: None,
             kind: ModKind::Other,
             load_position: Some(i + 1),
+            options: Vec::new(),
             problem: Some(
                 "SMF's load order lists this id, but no mod in the Mods folder has it. Turn it off to take it out \
                  of the load order."
@@ -274,7 +309,7 @@ pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<Mo
     (mods, notes)
 }
 
-fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache) -> ModEntry {
+fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache, config: &Config) -> ModEntry {
     let base = ModEntry {
         id: folder_name.to_string(),
         name: folder_name.to_string(),
@@ -285,6 +320,7 @@ fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache) -> ModEntry {
         kind: ModKind::Other,
         load_position: None,
         problem: None,
+        options: Vec::new(),
     };
     let manifest_path = path.join("manifest.json");
     if !manifest_path.is_file() {
@@ -293,6 +329,7 @@ fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache) -> ModEntry {
     }
     match read_manifest(&manifest_path) {
         Ok(m) => ModEntry {
+            options: options::describe(&m.options, config.options_of(&m.id).as_deref(), &config.load_order),
             kind: kinds.get(path, m.has_localisation()),
             id: m.id,
             name: m.name,
@@ -445,6 +482,41 @@ mod tests {
         assert!(smf.set_enabled(&game, "Nobody.Gone", true).unwrap_err().contains("no longer"));
         // A mod whose folder is gone can still be turned off.
         assert!(smf.set_enabled(&game, "Atampy26.RealisticAI", false).unwrap());
+    }
+
+    #[test]
+    fn shows_and_saves_a_mods_options() {
+        let tmp = tempfile::tempdir().unwrap();
+        let smf_folder = fake_install(tmp.path(), b"deploy");
+        std::fs::write(
+            smf_folder.join("Mods/Realistic AI/manifest.json"),
+            "{ id: 'Atampy26.RealisticAI', name: 'Realistic AI', options: [\
+             { name: 'Harder', type: 'checkbox', enabledByDefault: true },\
+             { name: 'Calm', group: 'Mood', type: 'select', enabledByDefault: true },\
+             { name: 'Angry', group: 'Mood', type: 'select' },\
+             { name: 'With accents', type: 'checkbox', requirements: ['Someone.Accents'] }] }",
+        )
+        .unwrap();
+        let game = GameInstall { store: Store::Folder, root: tmp.path().to_path_buf() };
+        let smf = Smf::default();
+        let ai = |smf: &Smf| smf.inspect(&game).mods.into_iter().find(|m| m.id == "Atampy26.RealisticAI").unwrap();
+
+        // On, with no modOptions entry yet: the defaults are shown.
+        let chosen: Vec<String> = ai(&smf).options.into_iter().filter(|o| o.chosen).map(|o| o.value).collect();
+        assert_eq!(chosen, ["Harder", "Mood:Calm"]);
+        assert_eq!(ai(&smf).options[3].needs, ["Someone.Accents"]);
+
+        assert!(smf.set_options(&game, "Atampy26.RealisticAI", &["Mood:Angry".into()]).unwrap());
+        let chosen: Vec<String> = ai(&smf).options.into_iter().filter(|o| o.chosen).map(|o| o.value).collect();
+        assert_eq!(chosen, ["Mood:Angry"]);
+
+        let err = smf.set_options(&game, "Atampy26.RealisticAI", &["With accents".into()]).unwrap_err();
+        assert!(err.contains("needs Someone.Accents"), "{err}");
+        assert!(smf.set_enabled(&game, "Someone.Accents", true).unwrap());
+        assert!(smf.set_options(&game, "Atampy26.RealisticAI", &["With accents".into()]).unwrap());
+
+        assert!(smf.set_options(&game, "Winter Suit", &[]).unwrap_err().contains("RPKG"));
+        assert!(smf.set_options(&game, "Broken", &[]).unwrap_err().contains("can't be changed"));
     }
 
     #[test]

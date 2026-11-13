@@ -5,8 +5,9 @@ import "../../../assets/fonts/Geist-Bold.ttf";
 import "../../../assets/fonts/GeistMono-Regular.ttf";
 import { ScrollView } from "std-widgets.slint";
 import { Button, Switch, Theme, Message, Messages } from "theme.slint";
+import { EditSheet, EditState, OptCheck, OptSelect } from "sheet.slint";
 
-export { Message }
+export { Message, EditState, OptCheck, OptSelect }
 
 export struct ModRow {
     // Set on a group heading row; the other fields are then empty.
@@ -20,6 +21,7 @@ export struct ModRow {
     badge: string,
     problem: string,
     can-toggle: bool,
+    can-edit: bool,
 }
 
 export global Ui {
@@ -34,7 +36,10 @@ export global Ui {
     in property <string> summary;
     in property <[ModRow]> mods;
     in property <[Message]> notes;
+    // "edit" while the edit sheet is open, otherwise empty.
+    in property <string> sheet;
     callback toggle(id: string, on: bool);
+    callback edit(id: string);
 }
 
 component Chip inherits Rectangle {
@@ -145,6 +150,14 @@ component ModRowView inherits Rectangle {
                 font-family: Theme.font-mono;
                 color: Theme.accent;
                 accessible-role: none;
+            }
+        }
+        if root.item.can-edit: VerticalLayout {
+            alignment: center;
+            Button {
+                text: "Edit";
+                accessible-label: "Edit " + root.item.name;
+                clicked => { Ui.edit(root.item.id); }
             }
         }
         if root.item.badge != "": VerticalLayout {
@@ -313,6 +326,8 @@ export component AppWindow inherits Window {
             }
         }
     }
+
+    if Ui.sheet == "edit": EditSheet { init => { self.focus(); } }
 }
 
 /// A plain message for errors before the main window exists.
