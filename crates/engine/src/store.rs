@@ -13,7 +13,10 @@ pub fn load(dir: &Path, file: &str) -> Result<Map<String, Value>, VmmError> {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
         Err(e) => {
-            return Err(VmmError::new(ErrorCode::SettingsUnreadable, format!("Could not read {}: {e}", path.display())));
+            return Err(VmmError::new(
+                ErrorCode::SettingsUnreadable,
+                format!("Could not read {}: {e}", path.display()),
+            ));
         }
     };
     match serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) {
