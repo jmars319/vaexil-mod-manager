@@ -1,10 +1,14 @@
 //! Simple Mod Framework, read through the files SMF documents for its users:
-//! `config.json`, the `Mods` folder and each mod's `manifest.json`. Nothing
-//! here writes, and nothing here runs SMF.
+//! `config.json`, the `Mods` folder and each mod's `manifest.json`. The one
+//! write, turning a mod on or off in `config.json`, lives in [`write`].
+//! Nothing here runs SMF.
 
+mod kind;
 mod releases;
+pub mod write;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -12,22 +16,31 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::framework::{Framework, Inspection, ModEntry, Status, Version};
+use crate::framework::{Framework, Inspection, ModEntry, ModKind, Status, Version};
 use crate::game::GameInstall;
 
 /// A file SMF itself keeps in `Mods`; it is not a mod.
 const MANAGED_MARKER: &str = "Managed by SMF, do not touch";
 
 /// Remembers the last version it worked out, so a refresh does not hash
-/// `Deploy.exe` again unless its size or modified time changed.
+/// `Deploy.exe` again unless its size or modified time changed, and each
+/// mod's kind, so a refresh does not walk every mod's files again.
 #[derive(Default)]
 pub struct Smf {
     version_cache: RefCell<Option<(VersionKey, Version)>>,
+    kinds: KindCache,
+    /// Where a copy of `config.json` goes before each write. `None` keeps no
+    /// copy, which only tests use.
+    backup_dir: Option<PathBuf>,
 }
 
 type VersionKey = (PathBuf, u64, Option<SystemTime>);
 
 impl Smf {
+    pub fn with_backups(backup_dir: PathBuf) -> Self {
+        Smf { backup_dir: Some(backup_dir), ..Smf::default() }
+    }
+
     fn version(&self, deploy_exe: &Path) -> Result<Version, String> {
         let meta =
             std::fs::metadata(deploy_exe).map_err(|e| format!("Could not read {}: {e}", deploy_exe.display()))?;
@@ -72,8 +85,30 @@ impl Framework for Smf {
                 };
             }
         };
-        let (mods, notes) = list_mods(&folder.join("Mods"), &config);
+        let (mods, notes) = list_mods(&folder.join("Mods"), &config, &self.kinds);
         Inspection { status: Status::Installed { folder, version }, mods, notes }
+    }
+
+    fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, String> {
+        let folder = find_folder(&game.root).ok_or("Simple Mod Framework is no longer in the game folder.")?;
+        let mut options = None;
+        if enabled {
+            let (mods, _) = list_mods(&folder.join("Mods"), &Config::default(), &self.kinds);
+            let m = mods
+                .iter()
+                .find(|m| m.id == mod_id)
+                .ok_or_else(|| format!("\"{mod_id}\" is no longer in SMF's Mods folder."))?;
+            if let Some(problem) = &m.problem {
+                return Err(format!("{} can't be turned on. {problem}", m.name));
+            }
+            if m.badge.as_deref() != Some("RPKG") {
+                let manifest = read_manifest(&m.folder.join("manifest.json"))?;
+                if !manifest.options.is_empty() {
+                    options = Some(write::default_options(&manifest.options));
+                }
+            }
+        }
+        write::set_enabled(&folder, mod_id, enabled, options.as_deref(), self.backup_dir.as_deref())
     }
 }
 
@@ -137,12 +172,54 @@ struct Manifest {
     version: Option<String>,
     #[serde(default)]
     authors: Vec<String>,
+    #[serde(default)]
+    options: Vec<serde_json::Value>,
+    #[serde(default)]
+    localisation: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "localisationOverrides", default)]
+    localisation_overrides: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "localisedLines", default)]
+    localised_lines: Option<serde::de::IgnoredAny>,
+}
+
+impl Manifest {
+    fn has_localisation(&self) -> bool {
+        self.localisation.is_some() || self.localisation_overrides.is_some() || self.localised_lines.is_some()
+    }
+}
+
+fn read_manifest(path: &Path) -> Result<Manifest, String> {
+    std::fs::read_to_string(path)
+        .map_err(|e| e.to_string())
+        .and_then(|t| json5::from_str::<Manifest>(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()))
+}
+
+/// Each mod's kind, worked out again only when its folder or manifest
+/// changes. Walking a large mod's files takes a moment.
+#[derive(Default)]
+pub struct KindCache(RefCell<HashMap<PathBuf, (KindKey, ModKind)>>);
+
+type KindKey = (Option<SystemTime>, Option<SystemTime>, bool);
+
+impl KindCache {
+    fn get(&self, folder: &Path, has_localisation: bool) -> ModKind {
+        let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let key = (modified(folder), modified(&folder.join("manifest.json")), has_localisation);
+        if let Some((cached, kind)) = self.0.borrow().get(folder)
+            && *cached == key
+        {
+            return *kind;
+        }
+        let kind = kind::classify(folder, has_localisation);
+        self.0.borrow_mut().insert(folder.to_path_buf(), (key, kind));
+        kind
+    }
 }
 
 /// Every mod folder in `Mods`, in load order first, then the mods that are
 /// off, by name. A folder without `manifest.json` is an RPKG-only mod, which
 /// SMF identifies by its folder name.
-pub fn list_mods(mods_dir: &Path, config: &Config) -> (Vec<ModEntry>, Vec<String>) {
+pub fn list_mods(mods_dir: &Path, config: &Config, kinds: &KindCache) -> (Vec<ModEntry>, Vec<String>) {
     let mut notes = Vec::new();
     let Ok(entries) = std::fs::read_dir(mods_dir) else {
         notes.push(format!("SMF's Mods folder is missing: {}", mods_dir.display()));
@@ -160,10 +237,33 @@ pub fn list_mods(mods_dir: &Path, config: &Config) -> (Vec<ModEntry>, Vec<String
             }
             continue;
         }
-        mods.push(read_mod(&path, &file_name));
+        mods.push(read_mod(&path, &file_name, kinds));
     }
     for m in &mut mods {
         m.load_position = config.load_order.iter().position(|id| *id == m.id).map(|i| i + 1);
+    }
+    // An id in the load order that no folder answers to: a mod that was
+    // removed, or one whose manifest broke so its real id can't be read. It
+    // gets a row so it can still be turned off.
+    for (i, id) in config.load_order.iter().enumerate() {
+        if mods.iter().any(|m| m.id == *id) || config.load_order[..i].contains(id) {
+            continue;
+        }
+        mods.push(ModEntry {
+            id: id.clone(),
+            name: id.clone(),
+            version: None,
+            authors: Vec::new(),
+            folder: mods_dir.join(id),
+            badge: None,
+            kind: ModKind::Other,
+            load_position: Some(i + 1),
+            problem: Some(
+                "SMF's load order lists this id, but no mod in the Mods folder has it. Turn it off to take it out \
+                 of the load order."
+                    .into(),
+            ),
+        });
     }
     mods.sort_by(|a, b| match (a.load_position, b.load_position) {
         (Some(x), Some(y)) => x.cmp(&y),
@@ -174,7 +274,7 @@ pub fn list_mods(mods_dir: &Path, config: &Config) -> (Vec<ModEntry>, Vec<String
     (mods, notes)
 }
 
-fn read_mod(path: &Path, folder_name: &str) -> ModEntry {
+fn read_mod(path: &Path, folder_name: &str, kinds: &KindCache) -> ModEntry {
     let base = ModEntry {
         id: folder_name.to_string(),
         name: folder_name.to_string(),
@@ -182,18 +282,24 @@ fn read_mod(path: &Path, folder_name: &str) -> ModEntry {
         authors: Vec::new(),
         folder: path.to_path_buf(),
         badge: None,
+        kind: ModKind::Other,
         load_position: None,
         problem: None,
     };
     let manifest_path = path.join("manifest.json");
     if !manifest_path.is_file() {
+        // RPKG-only mods are opaque packages, so their kind is not guessed.
         return ModEntry { badge: Some("RPKG".into()), ..base };
     }
-    let parsed = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| e.to_string())
-        .and_then(|t| json5::from_str::<Manifest>(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()));
-    match parsed {
-        Ok(m) => ModEntry { id: m.id, name: m.name, version: m.version, authors: m.authors, ..base },
+    match read_manifest(&manifest_path) {
+        Ok(m) => ModEntry {
+            kind: kinds.get(path, m.has_localisation()),
+            id: m.id,
+            name: m.name,
+            version: m.version,
+            authors: m.authors,
+            ..base
+        },
         Err(e) => ModEntry { problem: Some(format!("Its manifest.json could not be read: {e}")), ..base },
     }
 }
@@ -295,6 +401,50 @@ mod tests {
         let changed: Vec<&PathBuf> =
             before.keys().chain(after.keys()).filter(|p| before.get(*p) != after.get(*p)).collect();
         assert!(changed.is_empty(), "inspection changed {changed:?}");
+    }
+
+    #[test]
+    fn turns_mods_on_and_off_through_config_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let smf_folder = fake_install(tmp.path(), b"deploy");
+        std::fs::write(
+            smf_folder.join("Mods/Accent Overhaul/manifest.json"),
+            "{ id: 'Someone.Accents', name: 'Accent Overhaul', options: [\
+             { name: 'Japanese', type: 'checkbox', enabledByDefault: true },\
+             { name: 'All', group: 'Region', type: 'select', enabledByDefault: true }] }",
+        )
+        .unwrap();
+        let game = GameInstall { store: Store::Folder, root: tmp.path().to_path_buf() };
+        let backups = tmp.path().join("backups");
+        let smf = Smf::with_backups(backups.clone());
+
+        assert!(smf.set_enabled(&game, "Someone.Accents", true).unwrap());
+        assert!(!smf.set_enabled(&game, "Someone.Accents", true).unwrap());
+        assert!(smf.set_enabled(&game, "Winter Suit", false).unwrap());
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(smf_folder.join("config.json")).unwrap()).unwrap();
+        assert_eq!(config["loadOrder"], serde_json::json!(["Atampy26.RealisticAI", "Someone.Accents"]));
+        assert_eq!(config["modOptions"]["Someone.Accents"], serde_json::json!(["Japanese", "Region:All"]));
+        assert_eq!(config["skipIntro"], true);
+        assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 2);
+
+        let order: Vec<Option<usize>> =
+            smf.inspect(&game).mods.iter().filter(|m| m.name != "Broken").map(|m| m.load_position).collect();
+        assert_eq!(order, [Some(1), Some(2), None]);
+
+        assert!(smf.set_enabled(&game, "Broken", true).unwrap_err().contains("can't be turned on"));
+
+        // An enabled mod whose manifest breaks keeps a row under its old id,
+        // so it can still be turned off.
+        std::fs::write(smf_folder.join("Mods/Accent Overhaul/manifest.json"), "{ broken").unwrap();
+        let mods = smf.inspect(&game).mods;
+        let orphan = mods.iter().find(|m| m.id == "Someone.Accents").expect("a row for the old id");
+        assert_eq!(orphan.load_position, Some(2));
+        assert!(orphan.problem.as_deref().unwrap().contains("no mod in the Mods folder"));
+        assert!(smf.set_enabled(&game, "Someone.Accents", false).unwrap());
+        assert!(smf.set_enabled(&game, "Nobody.Gone", true).unwrap_err().contains("no longer"));
+        // A mod whose folder is gone can still be turned off.
+        assert!(smf.set_enabled(&game, "Atampy26.RealisticAI", false).unwrap());
     }
 
     #[test]

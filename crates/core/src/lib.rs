@@ -1,8 +1,9 @@
 //! Platform-neutral logic for Vaexil Mod Manager.
 //!
-//! Nothing in this crate writes anywhere. Game folders and mod frameworks are
-//! only ever opened for reading; the safety model in `docs/safety-model.md`
-//! lists every file that is read.
+//! The crate writes one file: a framework's own settings, when a mod is turned
+//! on or off ([`framework::Framework::set_enabled`]). Everything else in game
+//! folders and mod frameworks is only ever opened for reading. The safety
+//! model in `docs/safety-model.md` lists every file that is read or written.
 
 pub mod framework;
 pub mod game;
