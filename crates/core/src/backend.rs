@@ -51,6 +51,16 @@ pub trait Backend {
         load_order: &[String],
     ) -> Result<Vec<String>, VmmError>;
 
+    /// The options `set_enabled` would store for `mod_id` if the mods on
+    /// were `load_order`: its author's defaults when it has options and no
+    /// stored choice yet, otherwise `None` (nothing is stored). Writes nothing.
+    fn enable_defaults(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        load_order: &[String],
+    ) -> Result<Option<Vec<String>>, VmmError>;
+
     /// The mods as they would read with `order` as the load order and
     /// `options` in place of those mods' stored options: their load rules
     /// then include the rules of those options. Writes nothing; plans use it

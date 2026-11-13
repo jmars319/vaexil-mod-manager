@@ -160,6 +160,25 @@ impl Backend for Smf {
         write::set_load_order(&folder, order, self.backup_dir.as_deref())
     }
 
+    fn enable_defaults(
+        &self,
+        game: &GameInstall,
+        mod_id: &str,
+        load_order: &[String],
+    ) -> Result<Option<Vec<String>>, VmmError> {
+        let folder = smf_folder(game)?;
+        // As write::set_enabled: defaults only for a mod with no entry.
+        if read_config(&folder)?.mod_options.contains_key(mod_id) {
+            return Ok(None);
+        }
+        let m = self.find_mod(&folder, mod_id)?;
+        if m.problem.is_some() || m.badge.as_deref() == Some("RPKG") {
+            return Ok(None);
+        }
+        let manifest = manifest_of(&m)?;
+        Ok((!manifest.options.is_empty()).then(|| options::default_values(&manifest.options, load_order)))
+    }
+
     fn mods_with(
         &self,
         game: &GameInstall,

@@ -323,11 +323,17 @@ impl Engine {
                             let now = self.backend().mods_with(game, &sim.order, &chosen_by_plan)?;
                             vmm_core::order::insert_position(&sim.order, mod_id, &now)
                         };
+                        // A mod with no stored options gets its defaults,
+                        // worked out against the mods on before it, and they
+                        // stay stored for later steps.
+                        if !chosen_by_plan.contains_key(mod_id)
+                            && let Some(d) = self.backend().enable_defaults(game, mod_id, &sim.order)?
+                        {
+                            sim.chosen.insert(mod_id.clone(), d.iter().cloned().collect());
+                            chosen_by_plan.insert(mod_id.clone(), d);
+                        }
                         sim.order.insert(at, mod_id.clone());
                         place = Some((at + 1, sim.order.len()));
-                        // Turning a mod on gives it its default options.
-                        let defaults = m.options.iter().filter(|o| o.chosen).map(|o| o.value.clone()).collect();
-                        sim.chosen.insert(mod_id.clone(), defaults);
                     } else if !*enabled {
                         sim.order.retain(|id| id != mod_id);
                     }
@@ -844,6 +850,41 @@ mod tests {
             .and_then(|n| n.parse().ok())
             .unwrap();
         assert_eq!(c + 1, described, "{order:?} vs {}", plan.steps[1].description);
+    }
+
+    #[test]
+    fn defaults_stored_by_an_earlier_enable_stay_for_later_steps() {
+        let (_tmp, game, engine) = setup();
+        // B (off, no options stored) has a default needing A that makes B
+        // load after C. Enabling B while A is on stores it; it stays after A
+        // is turned off.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/B/manifest.json"),
+            "{ id: 'B', name: 'B mod', options: [{ name: 'X', type: 'checkbox', enabledByDefault: true, \
+             requirements: ['A'], loadAfter: ['C'] }] }",
+        )
+        .unwrap();
+        let plan = engine
+            .plan(
+                &game,
+                vec![
+                    Change::SetEnabled { mod_id: "B".into(), enabled: true },
+                    Change::SetEnabled { mod_id: "A".into(), enabled: false },
+                    Change::SetEnabled { mod_id: "C".into(), enabled: true },
+                ],
+            )
+            .unwrap();
+        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        let order = engine.current_setup(&game).unwrap().order;
+        let described: usize = plan.steps[2]
+            .description
+            .split("at place ")
+            .nth(1)
+            .and_then(|r| r.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap();
+        assert_eq!(order.iter().position(|m| m == "C").unwrap() + 1, described, "{order:?}");
+        assert_eq!(order, ["C", "B"]);
     }
 
     #[test]

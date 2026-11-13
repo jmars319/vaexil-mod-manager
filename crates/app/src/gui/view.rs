@@ -232,6 +232,14 @@ mod tests {
         ) -> Result<Vec<String>, vmm_core::error::VmmError> {
             unreachable!("the view never plans")
         }
+        fn enable_defaults(
+            &self,
+            _: &GameInstall,
+            _: &str,
+            _: &[String],
+        ) -> Result<Option<Vec<String>>, vmm_core::error::VmmError> {
+            unreachable!("the view never plans")
+        }
         fn mods_with(
             &self,
             _: &GameInstall,
