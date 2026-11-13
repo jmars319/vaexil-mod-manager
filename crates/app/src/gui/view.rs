@@ -1,6 +1,8 @@
 //! Turns what the core found into the words the window shows. Plain Rust, so
 //! it is tested without a window.
 
+use std::collections::BTreeMap;
+
 use vmm_core::framework::{Framework, Inspection, ModEntry, ModKind, Status, Version};
 use vmm_core::game::GameInstall;
 
@@ -41,9 +43,13 @@ pub struct Row {
     /// Whether the switch can be used. A mod whose manifest cannot be read
     /// cannot be turned on, but can be turned off.
     pub can_toggle: bool,
+    /// Whether the edit sheet (type and options) can be opened.
+    pub can_edit: bool,
 }
 
-pub fn build(installs: &[GameInstall], framework: &dyn Framework) -> View {
+/// `kinds` holds the types the user chose, by mod id; they replace the ones
+/// worked out from each mod's files.
+pub fn build(installs: &[GameInstall], framework: &dyn Framework, kinds: &BTreeMap<String, ModKind>) -> View {
     let Some(game) = installs.first() else {
         return message(
             "Not found",
@@ -104,7 +110,7 @@ pub fn build(installs: &[GameInstall], framework: &dyn Framework) -> View {
                 heading: String::new(),
                 message: String::new(),
                 summary,
-                rows: grouped(&inspection.mods),
+                rows: grouped(&inspection.mods, kinds),
                 notes,
             }
         }
@@ -114,10 +120,11 @@ pub fn build(installs: &[GameInstall], framework: &dyn Framework) -> View {
 /// One heading per kind that has mods, in [`ModKind::ALL`] order, each
 /// followed by its mods by name. The grouping is information only; the load
 /// position on each row is what SMF uses.
-fn grouped(mods: &[ModEntry]) -> Vec<Row> {
+fn grouped(mods: &[ModEntry], kinds: &BTreeMap<String, ModKind>) -> Vec<Row> {
     let mut rows = Vec::new();
     for kind in ModKind::ALL {
-        let mut group: Vec<&ModEntry> = mods.iter().filter(|m| m.kind == kind).collect();
+        let mut group: Vec<&ModEntry> =
+            mods.iter().filter(|m| kinds.get(&m.id).copied().unwrap_or(m.kind) == kind).collect();
         if group.is_empty() {
             continue;
         }
@@ -153,6 +160,11 @@ fn row(m: &ModEntry) -> Row {
     if m.badge.as_deref() == Some("RPKG") {
         parts.push("RPKG mod, no manifest".to_string());
     }
+    match m.options.len() {
+        0 => {}
+        1 => parts.push("1 option".to_string()),
+        n => parts.push(format!("{n} options")),
+    }
     Row {
         heading: String::new(),
         id: m.id.clone(),
@@ -162,6 +174,7 @@ fn row(m: &ModEntry) -> Row {
         badge: m.badge.clone().unwrap_or_default(),
         problem: m.problem.clone().unwrap_or_default(),
         can_toggle: m.problem.is_none() || m.load_position.is_some(),
+        can_edit: m.problem.is_none(),
     }
 }
 
@@ -185,6 +198,9 @@ mod tests {
         fn set_enabled(&self, _: &GameInstall, _: &str, _: bool) -> Result<bool, String> {
             unreachable!("the view never writes")
         }
+        fn set_options(&self, _: &GameInstall, _: &str, _: &[String]) -> Result<bool, String> {
+            unreachable!("the view never writes")
+        }
     }
 
     fn game(store: Store, root: &str) -> GameInstall {
@@ -202,7 +218,12 @@ mod tests {
             kind,
             load_position: position,
             problem: None,
+            options: vec![],
         }
+    }
+
+    fn build(installs: &[GameInstall], framework: &dyn Framework) -> View {
+        super::build(installs, framework, &BTreeMap::new())
     }
 
     fn installed(mods: Vec<ModEntry>) -> Fake {
@@ -249,6 +270,7 @@ mod tests {
                 badge: "".into(),
                 problem: "".into(),
                 can_toggle: true,
+                can_edit: true,
             }
         );
         assert_eq!(view.rows[2].position, 0);
@@ -271,6 +293,30 @@ mod tests {
             .map(|r| if r.heading.is_empty() { r.name.clone() } else { format!("# {}", r.heading) })
             .collect();
         assert_eq!(labels, ["# Gameplay", "Gamma", "# Sound", "alpha", "Bravo", "# Other", "zeta"]);
+    }
+
+    #[test]
+    fn the_users_type_wins_and_options_are_counted() {
+        let mut two = entry("Two", ModKind::Gameplay, Some(1));
+        let option = vmm_core::framework::ModOption {
+            value: "X".into(),
+            label: "X".into(),
+            group: None,
+            tooltip: None,
+            chosen: true,
+            needs: vec![],
+        };
+        two.options = vec![option.clone(), option];
+        let fw = installed(vec![entry("One", ModKind::Gameplay, None), two]);
+        let kinds = BTreeMap::from([("Id.One".to_string(), ModKind::Sound)]);
+        let view = super::build(&[game(Store::Steam, r"C:\G")], &fw, &kinds);
+        let labels: Vec<String> = view
+            .rows
+            .iter()
+            .map(|r| if r.heading.is_empty() { r.name.clone() } else { format!("# {}", r.heading) })
+            .collect();
+        assert_eq!(labels, ["# Gameplay", "Two", "# Sound", "One"]);
+        assert_eq!(view.rows[1].detail, "1.0.0 · A, B · 2 options");
     }
 
     #[test]

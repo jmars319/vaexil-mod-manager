@@ -1,0 +1,130 @@
+// The edit sheet for one mod: its type, and its options when it has any.
+// Rust fills EditState when the sheet opens and writes nothing until Save.
+import { ScrollView } from "std-widgets.slint";
+import { Button, ButtonRow, CheckBox, ComboBox, FieldLabel, Sheet, Theme } from "theme.slint";
+
+export struct OptCheck {
+    label: string,
+    // The tooltip, and what the option needs when it can't be chosen yet.
+    detail: string,
+    checked: bool,
+    enabled: bool,
+}
+
+export struct OptSelect {
+    group: string,
+    labels: [string],
+    index: int,
+    enabled: bool,
+}
+
+export global EditState {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <[string]> kinds;
+    in-out property <int> kind-index;
+    in property <bool> kind-enabled: true;
+    // Why the type can't be changed, when it can't.
+    in property <string> note;
+    in property <[OptCheck]> checks;
+    in property <[OptSelect]> selects;
+    in property <string> error;
+    callback kind(index: int);
+    callback check(index: int, on: bool);
+    callback select(group: int, index: int);
+    callback save();
+    callback cancel();
+}
+
+export component EditSheet inherits Sheet {
+    title: EditState.title;
+    subtitle: EditState.subtitle;
+    panel-width: 560px;
+    close => { EditState.cancel(); }
+    forward-focus: kind-box;
+
+    VerticalLayout {
+        spacing: 6px;
+        FieldLabel { text: "Type"; }
+        kind-box := ComboBox {
+            model: EditState.kinds;
+            current-index: EditState.kind-index;
+            enabled: EditState.kind-enabled;
+            accessible-label: "Type of " + EditState.title;
+            selected => { EditState.kind(self.current-index); }
+        }
+        if EditState.note != "": Text {
+            text: EditState.note;
+            font-size: 12px;
+            color: Theme.warning;
+            wrap: word-wrap;
+        }
+    }
+
+    if EditState.checks.length > 0 || EditState.selects.length > 0: VerticalLayout {
+        spacing: 6px;
+        FieldLabel { text: "Options"; }
+        options := ScrollView {
+            // Long option lists scroll inside the sheet.
+            height: min(inner.preferred-height, 360px);
+            inner := VerticalLayout {
+                width: options.visible-width;
+                spacing: 10px;
+                padding-right: 8px;
+                for c[i] in EditState.checks: VerticalLayout {
+                    spacing: 2px;
+                    CheckBox {
+                        text: c.label;
+                        checked: c.checked;
+                        enabled: c.enabled;
+                        toggled => { EditState.check(i, self.checked); }
+                    }
+                    if c.detail != "": Text {
+                        text: c.detail;
+                        font-size: 12px;
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                        accessible-role: none;
+                    }
+                }
+                for s[i] in EditState.selects: VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: s.group;
+                        font-size: 13px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                        accessible-role: none;
+                    }
+                    ComboBox {
+                        model: s.labels;
+                        current-index: s.index;
+                        enabled: s.enabled;
+                        accessible-label: s.group;
+                        selected => { EditState.select(i, self.current-index); }
+                    }
+                }
+            }
+        }
+    }
+
+    if EditState.error != "": Text {
+        text: EditState.error;
+        font-size: 12px;
+        color: Theme.danger;
+        wrap: word-wrap;
+        accessible-label: "Error: " + EditState.error;
+    }
+
+    ButtonRow {
+        Button {
+            text: "Cancel";
+            clicked => { EditState.cancel(); }
+        }
+        Button {
+            text: "Save";
+            primary: true;
+            clicked => { EditState.save(); }
+        }
+    }
+}

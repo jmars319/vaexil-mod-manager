@@ -8,7 +8,8 @@
 # the main window against a throwaway fake game folder: a click on a mod's
 # switch turns it on in config.json, keeps a copy of the old file, and moves
 # keyboard focus to the switch; a second click turns it off again. Focusing
-# the last mod's switch in a long list must scroll it into view.
+# the last mod's switch in a long list must scroll it into view. A mod's Edit
+# button opens its sheet, where a clicked checkbox and Save store the option.
 #
 #   ./scripts/smoke-mouse-clicks.ps1 [-Exe target\release\vaexil-mod-manager.exe]
 param([string] $Exe = (Join-Path $PSScriptRoot '..\target\release\vaexil-mod-manager.exe'))
@@ -97,7 +98,8 @@ foreach ($n in 1..24) {
     $id = 'Smoke.Mod{0:D2}' -f $n
     $dir = Join-Path $smf ('Mods\Mod {0:D2}' -f $n)
     New-Item -ItemType Directory -Force $dir | Out-Null
-    Set-Content -Path (Join-Path $dir 'manifest.json') -Value "{ `"id`": `"$id`", `"name`": `"Smoke Mod $('{0:D2}' -f $n)`", `"authors`": [`"Smoke`"] }"
+    $options = if ($n -eq 3) { ", `"options`": [{ `"name`": `"Darker`", `"type`": `"checkbox`" }]" } else { '' }
+    Set-Content -Path (Join-Path $dir 'manifest.json') -Value "{ `"id`": `"$id`", `"name`": `"Smoke Mod $('{0:D2}' -f $n)`", `"authors`": [`"Smoke`"]$options }"
 }
 
 function LoadOrder { (Get-Content $config -Raw) -match "Smoke.Mod02" }
@@ -134,15 +136,40 @@ try {
     $toggle = $switch.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     Check 'switch: follows config.json changed elsewhere' ($toggle.Current.ToggleState -eq 'On')
 
-    # Tab from Smoke Mod 02 down to the last switch, which starts below the
-    # visible part of the list. UI Automation only lists on-screen rows, so
-    # finding it at all means the list scrolled.
-    foreach ($k in 3..24) {
+    # The edit sheet: open it, tick the option, save.
+    $edit = Find-Control $window 'Edit Smoke Mod 03'
+    if (-not $edit) { throw "no button named 'Edit Smoke Mod 03'" }
+    Click $window $edit
+    Start-Sleep -Milliseconds 800
+    $darker = Find-Control $window 'Darker'
+    if (-not $darker) { throw "the edit sheet has no option named 'Darker'" }
+    Click $window $darker
+    Start-Sleep -Milliseconds 300
+    $save = Find-Control $window 'Save'
+    Click $window $save
+    Start-Sleep -Milliseconds 800
+    Check 'sheet: Save stores the clicked option' ((Get-Content $config -Raw) -match '"Smoke\.Mod03":\s*\[\s*"Darker"')
+    $stillOpen = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($A::NameProperty), 'Save'))
+    Check 'sheet: Save closes the sheet' (-not $stillOpen)
+
+    # Tab down to the last switch, which starts below the visible part of the
+    # list. UI Automation only lists on-screen rows, so finding it at all
+    # means the list scrolled. Each row has two stops: its switch and Edit.
+    Click $window (Find-Control $window 'Edit Smoke Mod 01')
+    Start-Sleep -Milliseconds 600
+    [SmokeClicks]::PostMessage($h, 0x0100, [IntPtr]0x1B, [IntPtr]0x00010001) | Out-Null   # WM_KEYDOWN Escape
+    [SmokeClicks]::PostMessage($h, 0x0101, [IntPtr]0x1B, [IntPtr]0xC0010001) | Out-Null
+    Start-Sleep -Milliseconds 600
+    for ($k = 0; $k -lt 80; $k++) {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused -and $focused.Current.Name -eq 'Smoke Mod 24') { break }
         [SmokeClicks]::PostMessage($h, 0x0100, [IntPtr]0x09, [IntPtr]0x000F0001) | Out-Null   # WM_KEYDOWN Tab
         [SmokeClicks]::PostMessage($h, 0x0101, [IntPtr]0x09, [IntPtr]0xC00F0001) | Out-Null   # WM_KEYUP Tab
-        Start-Sleep -Milliseconds 120
+        Start-Sleep -Milliseconds 150
     }
     Start-Sleep -Milliseconds 800
+    $cancel = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($A::NameProperty), 'Cancel'))
+    Check 'sheet: Escape closes it' (-not $cancel)
     $last = Find-Control $window 'Smoke Mod 24'
     $win = $window.Current.BoundingRectangle
     $inView = $last -and $last.Current.HasKeyboardFocus -and $last.Current.BoundingRectangle.Bottom -le $win.Bottom

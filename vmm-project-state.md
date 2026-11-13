@@ -18,26 +18,28 @@ The working state around the plan page and the docs. The plan page holds the roa
 - Stage 00 (direction, ADR-0034) and stage 01 (repo, read-only first window, #1) are done.
 - Stage 02, in progress since 2026-11-13, in four PRs:
   1. Mods view grouped by type, with on/off switches. #12, merged 2026-11-13 as 118506b. The app's first write.
-  2. Mod options sheet (`modOptions`) and a type override kept in the app's own settings.
+  2. Edit sheet per mod: options (`modOptions`) and a type override kept in the app's own `settings.json`. #14, in review.
   3. Load order view: drag, Auto-sort by `loadBefore`/`loadAfter`, broken-rule warnings, "overridden by" markers in the Mods view.
   4. Setups, Play (deploy if changed, then start HITMAN) and Deploy, both blocked while HITMAN runs.
 - Then stage 03 (deploy view and diagnostics), 04 (keep SMF current), 05 (Steam's Play button), 06 (first release and update notice). The old repo `JAMARQ-Digital-LLC/vaexil-simple-mod-framework` is archived, and its Dependabot #24 closed, after the app's first deploy on this PC.
 
 ## Active Task State & Known Regressions
 
-- `main` is at #12 (118506b): grouped Mods view and switches. Before merging, its three Codex review findings were fixed, answered and resolved: no backup without an app data folder, concurrent writers, and a broken enabled mod that couldn't be turned off. Next is stage 02's PR 2, mod options and the type override.
+- `main` is at #12 (118506b): grouped Mods view and switches. Before merging, its three Codex review findings were fixed, answered and resolved: no backup without an app data folder, concurrent writers, and a broken enabled mod that couldn't be turned off. Stage 02's PR 2, the edit sheet, is open as #14 (CI and the Codex review pending).
 - Merging needs every review thread resolved (branch protection: conversation resolution and linear history). GitHub auto-merge is off for this repo. Codex reviews each push.
 - Installed on JASON-PC: built from 118506b with `scripts/package.ps1` and installed per-user with the Inno installer (`/VERYSILENT`) on 2026-11-13. The installed exe's SHA-256 matches the build. Still versioned 0.1.0, because nothing is released. Checked against the real install without clicking: SMF 2.33.45, 15 mods, 10 on, no orphaned load-order ids.
 - HITMAN folder (2026-11-12): official SMF 2.33.45 applied the way SMF's updater does, Vortex leftovers removed, the owner's 10-mod `config.json` restored. Test deploy took 30m32s with 0 errors. The pre-reinstall backup is in `Downloads\hitman-smf-backup-2026-11-12` until the owner has checked the game.
 - Known gaps:
-  - Type guesses put Lighting Ultimate and the glasses fix in Gameplay, until the override in PR 2.
+  - Type guesses put Lighting Ultimate and the glasses fix in Gameplay. #14's type override fixes that by hand, once it merges.
   - SMF 2.33.43 and 2.33.44 are missing from the release table, so either would show as unknown until stage 04 replaces the table.
 - No GitHub release exists yet.
 
 ## Temporary Logic Rules & Constraints
 
-- `config.json` is JSON5 as SMF writes it (single quotes). The app reads JSON5 and writes plain JSON with key order kept (serde_json `preserve_order`), touching only `loadOrder`, plus `modOptions` the first time a mod with options is turned on.
-- First-time on must fill the author's `enabledByDefault` checkbox and select options: `Deploy.exe` applies no options for a mod without a `modOptions` entry.
+- `config.json` is JSON5 as SMF writes it (single quotes). The app reads JSON5 and writes plain JSON with key order kept (serde_json `preserve_order`). It touches only `loadOrder`, and `modOptions` for the mod being turned on for the first time or saved from its edit sheet. Both writes go through `write::update`.
+- First-time on must fill the author's `enabledByDefault` checkbox and select options, minus options whose `requirements` are off: `Deploy.exe` applies no options for a mod without a `modOptions` entry.
+- SMF option rules (`smf/options.rs`): only checkbox (stored as `name`) and select (stored as `group:name`, one per group) options are shown. Conditional options are hidden. An option whose required mods are off can't be chosen, because SMF drops it.
+- Type overrides live in `%LOCALAPPDATA%\Vaexil Mod Manager\settings.json` as `kindOverrides` (mod id to kind key, such as `models-textures`). Unknown keys are kept. An unreadable file is never overwritten, and type changes are off until it is fixed.
 - Each write: copy the old file to `%LOCALAPPDATA%\Vaexil Mod Manager\config-backups` (newest 20; a failed copy, or no `%LOCALAPPDATA%`, stops the write). Then write `config.json.vmm-<pid>.tmp`, read `config.json` again and refuse if it changed since it was read, and rename over. Any new write updates `docs/safety-model.md` in the same PR.
 - A load-order id that no mod folder answers to gets its own row (kind Other, with a problem line), so it can be turned off.
 - Slint: assigning a Switch's `checked` ends its binding, so the row re-syncs it on `changed item`. ScrollView already scrolls a focused control into view; don't add scroll code. UI Automation sees only on-screen rows, so smoke tests reach lower rows with Tab.

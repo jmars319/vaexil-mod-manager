@@ -13,10 +13,13 @@ pub trait Framework {
     /// Reads the framework's state for one game install. Never writes.
     fn inspect(&self, game: &GameInstall) -> Inspection;
 
-    /// Turns one mod on or off in the framework's own settings, the only
-    /// thing this trait writes. Returns `false` when the mod was already in
-    /// that state and nothing was written.
+    /// Turns one mod on or off in the framework's own settings. Returns
+    /// `false` when the mod was already in that state and nothing was written.
     fn set_enabled(&self, game: &GameInstall, mod_id: &str, enabled: bool) -> Result<bool, String>;
+
+    /// Saves which of a mod's options are chosen, given as their
+    /// [`ModOption::value`]s. Returns `false` when nothing changed.
+    fn set_options(&self, game: &GameInstall, mod_id: &str, chosen: &[String]) -> Result<bool, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +88,23 @@ impl ModKind {
         ModKind::Other,
     ];
 
+    /// A stable name for saving the kind, such as "models-textures".
+    pub fn key(self) -> &'static str {
+        match self {
+            ModKind::Gameplay => "gameplay",
+            ModKind::ModelsTextures => "models-textures",
+            ModKind::Sound => "sound",
+            ModKind::Dialogue => "dialogue",
+            ModKind::Ui => "ui",
+            ModKind::Text => "text",
+            ModKind::Other => "other",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<ModKind> {
+        ModKind::ALL.into_iter().find(|k| k.key() == key)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             ModKind::Gameplay => "Gameplay",
@@ -113,4 +133,22 @@ pub struct ModEntry {
     /// Why the mod's own description could not be read, if it could not.
     /// Such a mod cannot be turned on.
     pub problem: Option<String>,
+    /// The options the user can choose, in the mod's own order.
+    pub options: Vec<ModOption>,
+}
+
+/// One choosable option of a mod.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModOption {
+    /// What the framework stores when the option is chosen.
+    pub value: String,
+    pub label: String,
+    /// Set when the option is one choice among several: exactly one option
+    /// of a group is chosen.
+    pub group: Option<String>,
+    pub tooltip: Option<String>,
+    pub chosen: bool,
+    /// Mods this option needs turned on, which are not. It can't be chosen
+    /// until they are.
+    pub needs: Vec<String>,
 }
