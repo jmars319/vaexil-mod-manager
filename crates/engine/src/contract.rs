@@ -292,9 +292,12 @@ impl Engine {
                 self.kind_overrides()
             },
         };
-        // Options an earlier step chose, which can bring load rules of their
-        // own; placing a mod after such a step reads the mods again with them.
+        // Options an earlier step chose. Options bring load rules of their
+        // own, and which defaults apply depends on the mods that are on, so
+        // once the plan has changed either, placing a mod reads the mods
+        // again as they will be at that point.
         let mut chosen_by_plan: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let stored_order = sim.order.clone();
         let mut steps = Vec::new();
         for change in changes {
             let step = match change {
@@ -314,7 +317,7 @@ impl Engine {
                     // rule changed after planning changes the step.
                     let mut place = None;
                     if *enabled && !on {
-                        let at = if chosen_by_plan.is_empty() {
+                        let at = if chosen_by_plan.is_empty() && sim.order == stored_order {
                             vmm_core::order::insert_position(&sim.order, mod_id, mods)
                         } else {
                             let now = self.backend().mods_with(game, &sim.order, &chosen_by_plan)?;
@@ -806,6 +809,41 @@ mod tests {
         );
         engine.apply_plan(&game, &plan.plan_id).unwrap();
         assert_eq!(engine.current_setup(&game).unwrap().order, ["B", "A"]);
+    }
+
+    #[test]
+    fn a_default_option_that_an_earlier_step_makes_usable_brings_its_rules() {
+        let (_tmp, game, engine) = setup();
+        // A (on, no options stored) has a default option that needs B and
+        // makes A load after C. Turning B on makes that option apply.
+        std::fs::write(
+            game.root.join("Simple Mod Framework/Mods/A/manifest.json"),
+            "{ id: 'A', name: 'A mod', options: [{ name: 'X', type: 'checkbox', enabledByDefault: true, \
+             requirements: ['B'], loadAfter: ['C'] }] }",
+        )
+        .unwrap();
+        let plan = engine
+            .plan(
+                &game,
+                vec![
+                    Change::SetEnabled { mod_id: "B".into(), enabled: true },
+                    Change::SetEnabled { mod_id: "C".into(), enabled: true },
+                ],
+            )
+            .unwrap();
+        let placed = engine.current_setup(&game).unwrap().order;
+        assert_eq!(placed, ["A"], "planning changed nothing");
+        engine.apply_plan(&game, &plan.plan_id).unwrap();
+        let order = engine.current_setup(&game).unwrap().order;
+        let c = order.iter().position(|m| m == "C").unwrap();
+        let described: usize = plan.steps[1]
+            .description
+            .split("at place ")
+            .nth(1)
+            .and_then(|r| r.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap();
+        assert_eq!(c + 1, described, "{order:?} vs {}", plan.steps[1].description);
     }
 
     #[test]
