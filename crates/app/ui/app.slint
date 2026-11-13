@@ -7,8 +7,9 @@ import { ScrollView } from "std-widgets.slint";
 import { Button, Switch, Theme, Message, Messages } from "theme.slint";
 import { EditSheet, EditState, OptCheck, OptSelect } from "sheet.slint";
 import { OrderList, OrderRowData, OrderState } from "order.slint";
+import { PassBatch, PassCandidate, PassState, PassView, SetupsSheet, SetupsState } from "setups.slint";
 
-export { Message, EditState, OptCheck, OptSelect, OrderRowData, OrderState }
+export { Message, EditState, OptCheck, OptSelect, OrderRowData, OrderState, PassBatch, PassCandidate, PassState, SetupsState }
 
 export struct ModRow {
     // Set on a group heading row; the other fields are then empty.
@@ -53,6 +54,19 @@ export global Ui {
     callback auto-sort();
     callback save-order();
     callback discard-order();
+    // Deploy and Play.
+    in property <string> deploy-status;
+    // "busy", "ok", "warn" or "error".
+    in property <string> deploy-tone;
+    in property <bool> can-deploy;
+    in property <bool> can-play;
+    in property <bool> has-log;
+    in property <string> setup-label: "Setups";
+    callback deploy();
+    callback play();
+    callback open-log();
+    callback show-setups();
+    callback show-pass(show: bool);
     callback toggle(id: string, on: bool);
     callback edit(id: string);
 }
@@ -91,6 +105,58 @@ component GroupHeading inherits Rectangle {
         font-weight: 600;
         color: Theme.secondary-text;
         accessible-role: none;
+    }
+}
+
+/// The deploy line: what state the game is in, and Deploy and Play.
+component DeployBar inherits Rectangle {
+    property <color> tint: Ui.deploy-tone == "ok" ? Theme.ready
+        : Ui.deploy-tone == "error" ? Theme.danger
+        : Ui.deploy-tone == "busy" ? Theme.running : Theme.warning;
+    min-height: bar.preferred-height;
+    border-radius: 12px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: root.tint.transparentize(55%);
+    bar := HorizontalLayout {
+        padding: 10px;
+        padding-left: 14px;
+        spacing: 10px;
+        Rectangle {
+            width: 8px;
+            Rectangle {
+                y: (parent.height - 8px) / 2;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.tint;
+            }
+        }
+        Text {
+            text: Ui.deploy-status;
+            color: Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            wrap: word-wrap;
+            accessible-label: "Deploy status: " + Ui.deploy-status;
+        }
+        if Ui.has-log: Button {
+            text: "Open log";
+            accessible-label: "Open the last deploy log";
+            clicked => { Ui.open-log(); }
+        }
+        Button {
+            text: "Deploy";
+            enabled: Ui.can-deploy;
+            clicked => { Ui.deploy(); }
+        }
+        Button {
+            text: "Play";
+            primary: true;
+            enabled: Ui.can-play;
+            accessible-label: "Play HITMAN";
+            clicked => { Ui.play(); }
+        }
     }
 }
 
@@ -322,6 +388,12 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                 }
             }
+            HorizontalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 12px;
+                DeployBar { }
+            }
             OrderList {
                 vertical-stretch: 1;
                 rows: Ui.order-rows;
@@ -329,7 +401,46 @@ export component AppWindow inherits Window {
             }
         }
 
-        if Ui.screen == "mods" && Ui.view != "order": VerticalLayout {
+        if Ui.screen == "mods" && Ui.view == "pass": VerticalLayout {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 10px;
+                spacing: 10px;
+                Text {
+                    text: "Compatibility pass";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // Ending keeps the mods as they are now; save them as a
+                // setup to come back to them.
+                if PassState.active: Button {
+                    text: "End pass";
+                    accessible-label: "End compatibility pass";
+                    clicked => { PassState.end(); }
+                }
+                Button {
+                    text: "Back to mods";
+                    clicked => { Ui.show-pass(false); }
+                }
+            }
+            HorizontalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 12px;
+                DeployBar { }
+            }
+            PassView {
+                vertical-stretch: 1;
+                gutter: gutter;
+            }
+        }
+
+        if Ui.screen == "mods" && Ui.view == "mods": VerticalLayout {
             vertical-stretch: 1;
             HorizontalLayout {
                 padding-left: gutter;
@@ -350,9 +461,24 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                 }
                 Button {
+                    text: Ui.setup-label;
+                    accessible-label: Ui.setup-label + ". Open setups";
+                    clicked => { Ui.show-setups(); }
+                }
+                Button {
+                    text: "Compatibility pass";
+                    clicked => { Ui.show-pass(true); }
+                }
+                Button {
                     text: "Load order";
                     clicked => { Ui.show-order(true); }
                 }
+            }
+            HorizontalLayout {
+                padding-left: gutter;
+                padding-right: gutter;
+                padding-bottom: 12px;
+                DeployBar { }
             }
             list := ScrollView {
                 vertical-stretch: 1;
@@ -408,7 +534,7 @@ export component AppWindow inherits Window {
             padding-top: 8px;
             padding-bottom: 12px;
             Text {
-                text: "A switch changes SMF's config.json; the previous copy is kept first. The change reaches the game at the next deploy. Version " + Ui.version + ".";
+                text: "Changes go to SMF's config.json, after keeping a copy, and reach the game at the next deploy. Version " + Ui.version + ".";
                 font-size: 11px;
                 color: Theme.secondary-text;
                 wrap: word-wrap;
@@ -417,6 +543,7 @@ export component AppWindow inherits Window {
     }
 
     if Ui.sheet == "edit": EditSheet { init => { self.focus(); } }
+    if Ui.sheet == "setups": SetupsSheet { init => { self.focus(); } }
 }
 
 /// A plain message for errors before the main window exists.

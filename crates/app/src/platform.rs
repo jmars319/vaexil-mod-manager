@@ -1,5 +1,6 @@
 //! Windows-specific lookups. Everything that touches the OS lives here so the
-//! rest of the app stays testable. All of it is read-only.
+//! rest of the app stays testable. Nothing here writes; `open` hands a link
+//! or file to Windows, as a double-click would.
 
 use std::path::PathBuf;
 
@@ -77,6 +78,58 @@ fn epic_manifests() -> Option<PathBuf> {
 /// installs games by default.
 fn xbox_roots() -> Vec<PathBuf> {
     (b'A'..=b'Z').map(|d| PathBuf::from(format!("{}:\\XboxGames", d as char))).filter(|p| p.is_dir()).collect()
+}
+
+/// Which of `names` (executable file names, any case) are running now.
+#[cfg(windows)]
+pub fn running(names: &[&str]) -> Vec<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    };
+
+    let mut found = Vec::new();
+    // SAFETY: a process snapshot, read with a correctly sized entry and closed.
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return found };
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut ok = Process32FirstW(snap, &mut entry).is_ok();
+        while ok {
+            let end = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            let exe = String::from_utf16_lossy(&entry.szExeFile[..end]);
+            if names.iter().any(|n| n.eq_ignore_ascii_case(&exe)) && !found.contains(&exe) {
+                found.push(exe);
+            }
+            ok = Process32NextW(snap, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    found
+}
+
+#[cfg(not(windows))]
+pub fn running(_names: &[&str]) -> Vec<String> {
+    Vec::new()
+}
+
+/// Opens a link or a file with what Windows has registered for it, such as
+/// `steam://rungameid/...` with Steam, or a log file with the text editor.
+#[cfg(windows)]
+pub fn open(target: &str) -> Result<(), String> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{HSTRING, w};
+
+    let target_w = HSTRING::from(target);
+    // SAFETY: plain shell call with valid strings.
+    let result = unsafe { ShellExecuteW(None, w!("open"), &target_w, None, None, SW_SHOWNORMAL) };
+    // ShellExecute reports success with a value above 32.
+    if result.0 as isize > 32 { Ok(()) } else { Err(format!("Windows could not open {target}.")) }
+}
+
+#[cfg(not(windows))]
+pub fn open(target: &str) -> Result<(), String> {
+    Err(format!("Opening {target} is only supported on Windows."))
 }
 
 #[cfg(windows)]

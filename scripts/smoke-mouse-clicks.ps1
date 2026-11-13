@@ -10,6 +10,11 @@
 # keyboard focus to the switch; a second click turns it off again. Focusing
 # the last mod's switch in a long list must scroll it into view. A mod's Edit
 # button opens its sheet, where a clicked checkbox and Save store the option.
+# The Load order view's moves and drag are drafts until Save. Deploy runs a
+# stand-in Deploy.exe (the fake-deploy example, built first) and must end up
+# to date with a log; a later change must show as changes since the deploy.
+# A setup can be saved, and a compatibility pass can start with every mod
+# off, try a batch and turn it off again.
 #
 #   ./scripts/smoke-mouse-clicks.ps1 [-Exe target\release\vaexil-mod-manager.exe]
 param([string] $Exe = (Join-Path $PSScriptRoot '..\target\release\vaexil-mod-manager.exe'))
@@ -50,6 +55,8 @@ function Find-Control($window, $name) {
 }
 
 function Click($window, $control) {
+    # A control that wasn't found must fail the test, not click nothing.
+    if (-not $control) { throw 'Click: the control was not found (off screen, or renamed)' }
     $h = [IntPtr]$window.Current.NativeWindowHandle
     $b = $control.Current.BoundingRectangle
     $pt = New-Object SmokeClicks+POINT
@@ -91,7 +98,9 @@ $data = Join-Path $work 'app-data'
 New-Item -ItemType Directory -Force (Join-Path $work 'Retail') | Out-Null
 Set-Content -Path (Join-Path $work 'Retail\HITMAN3.exe') -Value '' -NoNewline
 New-Item -ItemType Directory -Force $smf | Out-Null
-Set-Content -Path (Join-Path $smf 'Deploy.exe') -Value '' -NoNewline
+$fake = Join-Path $PSScriptRoot '..\target\release\examples\fake-deploy.exe'
+if (-not (Test-Path $fake)) { throw "build the stand-in first: cargo build --release -p vaexil-mod-manager --example fake-deploy" }
+Copy-Item $fake (Join-Path $smf 'Deploy.exe')
 $config = Join-Path $smf 'config.json'
 Set-Content -Path $config -Value "{runtimePath:'..\\Runtime',loadOrder:['Smoke.Mod01'],skipIntro:false}" -NoNewline
 foreach ($n in 1..24) {
@@ -213,6 +222,59 @@ try {
     Click $window (Find-Control $window 'Back to mods')
     Start-Sleep -Milliseconds 600
     Check 'order: Back returns to the Mods view' ([bool](Find-Control $window 'Edit Smoke Mod 01'))
+
+    # Deploy, with the stand-in Deploy.exe.
+    function Wait-Name($name, $seconds) {
+        for ($k = 0; $k -lt $seconds * 4; $k++) {
+            $e = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($A::NameProperty), $name))
+            if ($e) { return $e }
+            Start-Sleep -Milliseconds 250
+        }
+        $null
+    }
+    Check 'deploy: not deployed yet at first' ([bool](Wait-Name 'Deploy status: Not deployed from Vaexil Mod Manager yet.' 3))
+    Click $window (Find-Control $window 'Deploy')
+    Check 'deploy: ends up to date' ([bool](Wait-Name 'Deploy status: Deployed and up to date.' 10))
+    $log = Get-ChildItem (Join-Path $data 'logs') -Filter 'deploy-*.log' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $logText = if ($log) { Get-Content $log.FullName -Raw } else { '' }
+    Check 'deploy: the log has the output and SMF''s flags' ($logText -match 'Done in 1s' -and $logText -match '--doNotPause --colors' -and $logText -match 'A warning on stderr')
+    Click $window (Find-Control $window 'Smoke Mod 03')
+    Check 'deploy: a change shows as changes since the deploy' ([bool](Wait-Name 'Deploy status: Changes since the last deploy. Deploy, or Play, to put them in the game.' 8))
+
+    # Setups: save the mods that are on now.
+    Click $window (Find-Control $window 'Setup: not saved. Open setups')
+    Start-Sleep -Milliseconds 800
+    $nameBox = Find-Control $window 'Setup name'
+    $nameBox.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Smoke setup')
+    Start-Sleep -Milliseconds 300
+    Click $window (Find-Control $window 'Save as setup')
+    Start-Sleep -Milliseconds 800
+    $setupsFile = Join-Path $data 'setups.json'
+    Check 'setups: Save keeps the mods that are on' ((Test-Path $setupsFile) -and (Get-Content $setupsFile -Raw) -match 'Smoke setup' -and (Get-Content $setupsFile -Raw) -match 'Smoke\.Mod03')
+    Click $window (Find-Control $window 'Close')
+    Start-Sleep -Milliseconds 600
+    Check 'setups: the header names the setup in use' ([bool](Wait-Name 'Setup: Smoke setup. Open setups' 8))
+
+    # A compatibility pass: every mod off, one batch, marked bad.
+    Click $window (Find-Control $window 'Compatibility pass')
+    Start-Sleep -Milliseconds 800
+    Click $window (Find-Control $window 'Start with every mod off')
+    Start-Sleep -Milliseconds 800
+    $order = { ((Get-Content $config -Raw | ConvertFrom-Json).loadOrder) -join ',' }
+    Check 'pass: starting turns every mod off' ((& $order) -eq '')
+    Click $window (Find-Control $window 'Smoke Mod 05')
+    Start-Sleep -Milliseconds 300
+    Click $window (Find-Control $window 'Try this batch')
+    Start-Sleep -Milliseconds 800
+    Check 'pass: trying a batch turns on just its mods' ((& $order) -eq 'Smoke.Mod05')
+    Click $window (Find-Control $window 'Mark batch bad')
+    Start-Sleep -Milliseconds 800
+    Check 'pass: a bad batch goes back to the baseline' ((& $order) -eq '')
+    Click $window (Find-Control $window 'End compatibility pass')
+    Start-Sleep -Milliseconds 600
+    Check 'pass: ending keeps the mods as they are' ((& $order) -eq '' -and -not ((Get-Content $setupsFile -Raw) -match '"pass"'))
+    Click $window (Find-Control $window 'Back to mods')
+    Start-Sleep -Milliseconds 400
 } finally {
     if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
 }

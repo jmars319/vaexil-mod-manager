@@ -3,6 +3,8 @@
 mod gui;
 mod platform;
 mod settings;
+mod setups;
+mod store;
 
 slint::include_modules!();
 

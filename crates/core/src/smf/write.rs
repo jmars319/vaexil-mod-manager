@@ -138,6 +138,32 @@ pub fn apply_order(config: &mut Value, new_order: &[String]) -> Result<bool, Str
     Ok(true)
 }
 
+/// Replaces `loadOrder` with `order` and sets each listed mod's options, as
+/// switching to a saved setup does. Other mods' options are kept.
+pub fn apply_setup(
+    config: &mut Value,
+    order: &[String],
+    options: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<bool, String> {
+    let Some(root) = config.as_object_mut() else {
+        return Err("SMF's config.json does not hold a settings object. Fix or reset it in SMF first.".into());
+    };
+    let before = Value::Object(root.clone());
+    root.insert("loadOrder".into(), Value::Array(order.iter().cloned().map(Value::String).collect()));
+    if !options.is_empty() {
+        let all = root.entry("modOptions").or_insert_with(|| Value::Object(Map::new()));
+        let Some(all) = all.as_object_mut() else {
+            return Err(
+                "The mod options in SMF's config.json are not a list per mod. Fix or reset them in SMF first.".into()
+            );
+        };
+        for (id, values) in options {
+            all.insert(id.clone(), Value::Array(values.iter().cloned().map(Value::String).collect()));
+        }
+    }
+    Ok(Value::Object(root.clone()) != before)
+}
+
 /// Saves a reordered load order in `config.json`. See [`update`].
 pub fn set_load_order(smf_folder: &Path, order: &[String], backup_dir: Option<&Path>) -> Result<bool, String> {
     update(smf_folder, backup_dir, |config| apply_order(config, order))
@@ -363,6 +389,18 @@ mod tests {
         }
         let tmp = folder_with("{ loadOrder: ['A', 7] }");
         assert!(set_load_order(tmp.path(), &["A".into()], None).unwrap_err().contains("plain list"));
+    }
+
+    #[test]
+    fn applying_a_setup_sets_order_and_its_options_only() {
+        let tmp = folder_with(SMF_WRITTEN);
+        let options = std::collections::BTreeMap::from([("C".to_string(), vec!["X".to_string()])]);
+        assert!(update(tmp.path(), None, |c| apply_setup(c, &["C".into(), "A".into()], &options)).unwrap());
+        let c = read(tmp.path());
+        assert_eq!(c["loadOrder"], serde_json::json!(["C", "A"]));
+        assert_eq!(c["modOptions"]["C"], serde_json::json!(["X"]));
+        assert_eq!(c["modOptions"]["B"], serde_json::json!(["Hands — Signature Suit:Bare hands"]));
+        assert!(!update(tmp.path(), None, |c| apply_setup(c, &["C".into(), "A".into()], &options)).unwrap());
     }
 
     #[test]

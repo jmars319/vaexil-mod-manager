@@ -2,11 +2,14 @@
 //! kind, refreshes every few seconds, turns mods on or off in SMF's
 //! `config.json` when a switch is used, opens the edit sheet for a mod's
 //! type and options, and shows the Load order view, whose changes are a draft
-//! until Save.
+//! until Save. It also deploys and starts the game, keeps setups, and runs
+//! compatibility passes (see `wire`).
 
 mod order_view;
+mod play;
 mod sheet;
 mod view;
+mod wire;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -20,6 +23,7 @@ use vmm_core::game::GameInstall;
 use vmm_core::smf::Smf;
 
 use crate::settings::Settings;
+use crate::setups::Setups;
 use crate::{AppWindow, EditState, Message, ModRow, OptCheck, OptSelect, OrderRowData, OrderState, Ui};
 
 pub fn run() -> i32 {
@@ -49,6 +53,11 @@ pub fn run() -> i32 {
         Some(dir) => Settings::load(dir),
         None => Ok(Settings::default()),
     };
+    let setups = match &data_dir {
+        Some(dir) => Setups::load(dir),
+        None => Ok(Setups::default()),
+    };
+    let record = data_dir.as_deref().map(play::Record::load).unwrap_or_default();
     let state = Rc::new(State {
         smf,
         rows,
@@ -64,6 +73,12 @@ pub fn run() -> i32 {
         draft: RefCell::default(),
         order_note: RefCell::default(),
         order_rows: Rc::new(VecModel::default()),
+        deploy: play::Shared::default(),
+        record: RefCell::new(record),
+        setups: RefCell::new(setups),
+        pass_candidates: RefCell::default(),
+        pass_picked: RefCell::default(),
+        fingerprint: RefCell::default(),
     });
     g.set_order_rows(ModelRc::from(state.order_rows.clone()));
     let es = ui.global::<EditState>();
@@ -72,6 +87,10 @@ pub fn run() -> i32 {
     refresh(&ui, &state);
     wire_sheet(&ui, &state);
     wire_order(&ui, &state);
+    let _deploy_timer = wire::wire_play(&ui, &state);
+    wire::wire_setups(&ui, &state);
+    wire::wire_pass(&ui, &state);
+    refresh(&ui, &state);
 
     {
         let weak = ui.as_weak();
@@ -136,6 +155,18 @@ struct State {
     /// A line about the last load-order action, such as what Auto-sort did.
     order_note: RefCell<Option<Message>>,
     order_rows: Rc<VecModel<OrderRowData>>,
+    /// The deploy in progress, shared with its worker thread.
+    deploy: play::Shared,
+    /// The last finished deploy.
+    record: RefCell<play::Record>,
+    /// Saved setups and the compatibility pass, or why they can't be read.
+    setups: RefCell<Result<Setups, String>>,
+    /// The ids behind the pass view's candidate rows, in row order.
+    pass_candidates: RefCell<Vec<String>>,
+    /// The candidates ticked for the next batch.
+    pass_picked: RefCell<Vec<String>>,
+    /// The status line's last fingerprint: when, under which quick key, and the value.
+    fingerprint: RefCell<Option<(std::time::Instant, String, String)>>,
 }
 
 /// The Load order view: moves and Auto-sort change a draft; Save writes it.
@@ -469,6 +500,7 @@ fn refresh(ui: &AppWindow, state: &State) {
     let note = state.order_note.borrow().clone().unwrap_or(Message { text: "".into(), error: false });
     g.set_order_note(note.text);
     g.set_order_note_error(note.error);
+    wire::refresh_extras(ui, state);
     let error = state.error.borrow().clone().map(|text| Message { text: text.into(), error: true });
     let settings_error =
         state.settings.borrow().as_ref().err().map(|text| Message { text: text.clone().into(), error: false });

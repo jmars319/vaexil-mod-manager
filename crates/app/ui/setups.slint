@@ -1,0 +1,314 @@
+// Saved setups, and the compatibility pass: a known-good baseline grown by
+// small batches, each tried and marked good or bad.
+import { LineEdit, ScrollView } from "std-widgets.slint";
+import { Button, ButtonRow, CheckBox, FieldLabel, Sheet, Theme } from "theme.slint";
+
+export global SetupsState {
+    // One line per saved setup: name, mod count, "in use".
+    in property <[string]> setups;
+    in-out property <string> name;
+    // The last result or problem.
+    in property <string> error;
+    // Why setups can't be read, if they can't.
+    in property <string> unreadable;
+    callback save-as(name: string);
+    callback use-setup(index: int);
+    callback delete-setup(index: int);
+    callback cancel();
+}
+
+export component SetupsSheet inherits Sheet {
+    title: "Setups";
+    subtitle: "A setup is a saved set of mods that are on, in their order, with their options. Switching changes SMF's config.json, after keeping a copy, and reaches the game at the next deploy.";
+    panel-width: 560px;
+    close => { SetupsState.cancel(); }
+    forward-focus: name-field;
+
+    if SetupsState.unreadable != "": Text {
+        text: SetupsState.unreadable;
+        font-size: 12px;
+        color: Theme.danger;
+        wrap: word-wrap;
+    }
+    VerticalLayout {
+        spacing: 6px;
+        FieldLabel { text: "Save the mods that are on now as"; }
+        HorizontalLayout {
+            spacing: 8px;
+            name-field := LineEdit {
+                text <=> SetupsState.name;
+                placeholder-text: "Setup name";
+                accessible-label: "Setup name";
+                accepted => { SetupsState.save-as(self.text); }
+            }
+            Button {
+                text: "Save";
+                primary: true;
+                accessible-label: "Save as setup";
+                clicked => { SetupsState.save-as(SetupsState.name); }
+            }
+        }
+    }
+    if SetupsState.setups.length > 0: VerticalLayout {
+        spacing: 6px;
+        FieldLabel { text: "Saved setups"; }
+        for s[i] in SetupsState.setups: HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: s;
+                color: Theme.text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Button {
+                text: "Use";
+                accessible-label: "Use setup " + s;
+                clicked => { SetupsState.use-setup(i); }
+            }
+            Button {
+                text: "Delete";
+                accessible-label: "Delete setup " + s;
+                clicked => { SetupsState.delete-setup(i); }
+            }
+        }
+    }
+    if SetupsState.error != "": Text {
+        text: SetupsState.error;
+        font-size: 12px;
+        color: Theme.secondary-text;
+        wrap: word-wrap;
+    }
+    ButtonRow {
+        Button {
+            text: "Close";
+            clicked => { SetupsState.cancel(); }
+        }
+    }
+}
+
+export struct PassBatch {
+    name: string,
+    detail: string,
+    // "Testing", "Good" or "Bad".
+    status: string,
+}
+
+export struct PassCandidate {
+    name: string,
+    detail: string,
+    checked: bool,
+}
+
+export global PassState {
+    in property <bool> active;
+    in property <string> baseline;
+    in property <[PassBatch]> batches;
+    in property <bool> testing;
+    in property <string> testing-name;
+    in property <string> testing-mods;
+    in-out property <string> notes;
+    in property <[PassCandidate]> candidates;
+    in-out property <string> batch-name;
+    in-out property <string> error;
+    callback start(from-current: bool);
+    callback candidate(index: int, on: bool);
+    callback begin(name: string);
+    callback mark(good: bool, notes: string);
+    callback end();
+}
+
+component Pill inherits Rectangle {
+    in property <string> text;
+    property <color> tint: root.text == "Good" ? Theme.ready : root.text == "Bad" ? Theme.danger : Theme.running;
+    height: 22px;
+    width: label.preferred-width + 16px;
+    border-radius: 11px;
+    background: root.tint.transparentize(84%);
+    label := Text {
+        text: root.text;
+        font-size: 11px;
+        font-weight: 600;
+        color: root.tint;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component PassView inherits ScrollView {
+    in property <length> gutter;
+
+    VerticalLayout {
+        width: root.visible-width;
+        alignment: start;
+        padding-left: root.gutter;
+        padding-right: root.gutter;
+        padding-bottom: root.gutter;
+        spacing: 14px;
+
+        if !PassState.active: VerticalLayout {
+            spacing: 10px;
+            Text {
+                text: "After a game update, find out which mods still work. Start from a known-good baseline, then try mods in small batches: deploy, check the log, play. A good batch joins the baseline. A bad batch is turned off in one step, and the baseline and your saves are untouched.";
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Button {
+                    text: "Start with every mod off";
+                    primary: true;
+                    clicked => { PassState.start(false); }
+                }
+                Button {
+                    text: "Start from the mods on now";
+                    clicked => { PassState.start(true); }
+                }
+            }
+        }
+
+        if PassState.active: VerticalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 4px;
+                FieldLabel { text: "Baseline (known good)"; }
+                Text {
+                    text: PassState.baseline;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+            }
+
+            if PassState.testing: Rectangle {
+                border-radius: 12px;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.running.transparentize(40%);
+                min-height: trying.preferred-height;
+                trying := VerticalLayout {
+                    padding: 14px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Trying: " + PassState.testing-name;
+                            font-weight: 700;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            wrap: word-wrap;
+                        }
+                        Pill { text: "Testing"; }
+                    }
+                    Text {
+                        text: PassState.testing-mods;
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: "Deploy, check the log, and play. Then say how it went.";
+                        font-size: 12px;
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                    }
+                    LineEdit {
+                        text <=> PassState.notes;
+                        placeholder-text: "Notes, such as \"stable for an hour\" or \"crash at the main menu\"";
+                        accessible-label: "Notes on this batch";
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        Button {
+                            text: "Mark good";
+                            primary: true;
+                            accessible-label: "Mark batch good";
+                            clicked => { PassState.mark(true, PassState.notes); PassState.notes = ""; }
+                        }
+                        Button {
+                            text: "Mark bad";
+                            accessible-label: "Mark batch bad";
+                            clicked => { PassState.mark(false, PassState.notes); PassState.notes = ""; }
+                        }
+                    }
+                }
+            }
+
+            if !PassState.testing: VerticalLayout {
+                spacing: 8px;
+                FieldLabel { text: "Next batch: pick a few related mods, then try them"; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        text <=> PassState.batch-name;
+                        placeholder-text: "Batch name (optional)";
+                        accessible-label: "Batch name";
+                    }
+                    Button {
+                        text: "Try this batch";
+                        primary: true;
+                        clicked => { PassState.begin(PassState.batch-name); }
+                    }
+                }
+                if PassState.error != "": Text {
+                    text: PassState.error;
+                    font-size: 12px;
+                    color: Theme.danger;
+                    wrap: word-wrap;
+                }
+                for c[i] in PassState.candidates: VerticalLayout {
+                    spacing: 2px;
+                    CheckBox {
+                        text: c.name;
+                        checked: c.checked;
+                        toggled => { PassState.candidate(i, self.checked); }
+                    }
+                    if c.detail != "": Text {
+                        text: c.detail;
+                        font-size: 12px;
+                        color: Theme.warning;
+                        wrap: word-wrap;
+                        accessible-role: none;
+                    }
+                }
+                if PassState.candidates.length == 0: Text {
+                    text: "Every mod is in the baseline.";
+                    color: Theme.secondary-text;
+                }
+            }
+
+            if PassState.testing && PassState.error != "": Text {
+                text: PassState.error;
+                font-size: 12px;
+                color: Theme.danger;
+                wrap: word-wrap;
+            }
+
+            if PassState.batches.length > 0: VerticalLayout {
+                spacing: 6px;
+                FieldLabel { text: "Batches, newest first"; }
+                for b in PassState.batches: HorizontalLayout {
+                    spacing: 10px;
+                    Pill { text: b.status; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        Text {
+                            text: b.name;
+                            font-weight: 600;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: b.detail;
+                            font-size: 12px;
+                            color: Theme.secondary-text;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+}

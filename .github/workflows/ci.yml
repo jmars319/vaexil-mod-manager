@@ -43,6 +43,10 @@ jobs:
       - name: Release build
         run: cargo build --release --locked -p vaexil-mod-manager
 
+      # The click smoke test deploys with this stand-in for SMF's Deploy.exe.
+      - name: Build the stand-in Deploy.exe
+        run: cargo build --release --locked -p vaexil-mod-manager --example fake-deploy
+
       - name: Report binary size
         shell: pwsh
         run: |

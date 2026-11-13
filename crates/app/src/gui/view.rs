@@ -214,6 +214,22 @@ mod tests {
         fn set_load_order(&self, _: &GameInstall, _: &[String]) -> Result<bool, String> {
             unreachable!("the view never writes")
         }
+        fn current_setup(&self, _: &GameInstall) -> Result<vmm_core::framework::Setup, String> {
+            unreachable!("the view reads only the inspection")
+        }
+        fn apply_setup(&self, _: &GameInstall, _: &vmm_core::framework::Setup) -> Result<Vec<String>, String> {
+            unreachable!("the view never writes")
+        }
+        fn deploy_fingerprint(&self, _: &GameInstall) -> Result<String, String> {
+            unreachable!("the view reads only the inspection")
+        }
+        fn deploy(
+            &self,
+            _: &GameInstall,
+            _: &mut dyn FnMut(&str),
+        ) -> Result<vmm_core::framework::DeployOutcome, String> {
+            unreachable!("the view never deploys")
+        }
     }
 
     fn game(store: Store, root: &str) -> GameInstall {
