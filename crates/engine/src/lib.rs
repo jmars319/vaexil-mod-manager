@@ -9,6 +9,7 @@
 //! framework goes through the backend, after a backup.
 
 pub mod ai_apps;
+pub mod app_update;
 pub mod contract;
 pub mod crash;
 pub mod deploy;

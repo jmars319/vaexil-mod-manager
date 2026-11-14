@@ -7,6 +7,7 @@
 //! `vmm-engine`; this module only turns the engine's answers into the window.
 
 mod ai_apps;
+mod app_update;
 mod order_view;
 mod report;
 mod settings;
@@ -72,6 +73,7 @@ pub fn run() -> i32 {
     wire::wire_pass(&ui, &state);
     settings::wire_settings(&ui, &state);
     settings::daily_smf_check(&state);
+    app_update::daily_check(&state);
     report::wire_report(&ui, &state);
     refresh(&ui, &state);
 
@@ -463,10 +465,16 @@ fn refresh(ui: &AppWindow, state: &State) {
             .filter(|_| !s.held)
             .map(|t| Message { text: format!("SMF {t} is available. Update it from Settings.").into(), error: false })
     });
+    // A newer Vaexil Mod Manager, from the last check.
+    let app_update = state.engine.app_update_status().latest.map(|v| Message {
+        text: format!("Vaexil Mod Manager {v} is available. Update it from Settings.").into(),
+        error: false,
+    });
     let notes = error
         .into_iter()
         .chain(settings_error)
         .chain(smf_update)
+        .chain(app_update)
         .chain(v.notes.into_iter().map(|n| Message { text: SharedString::from(n), error: false }));
     sync(&state.notes, notes.collect());
 }

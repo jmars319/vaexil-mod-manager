@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "updated": {
+      "type": "boolean"
+    },
+    "from": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "updated",
+    "from",
+    "to",
+    "message"
+  ],
+  "description": "`vmm update --yes`: what happened.",
+  "title": "AppUpdateResult",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

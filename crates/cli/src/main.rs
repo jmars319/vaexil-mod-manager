@@ -71,6 +71,10 @@ Changing (plan first, then apply the plan):
   vmm smf update --yes          download it, check it against GitHub's checksum, and
                                 install it the way SMF's own updater does, keeping
                                 your mods, settings and a copy of each replaced file
+  vmm update check              ask the release feed whether a newer Vaexil Mod
+                                Manager is out
+  vmm update --yes              download it, check its SHA-256, and install it
+                                (the window, if open, uses it once reopened)
   vmm play                      start HITMAN when the game has your mods; with
                                 changes since the last deploy, choose:
   vmm play --deploy --yes       deploy first, then start it
@@ -105,6 +109,10 @@ struct Args {
 
 fn usage(message: impl Into<String>) -> VmmError {
     VmmError::new(ErrorCode::Usage, message)
+}
+
+fn no_data_dir() -> VmmError {
+    VmmError::new(ErrorCode::Io, "There is no folder for Vaexil Mod Manager's data (LOCALAPPDATA isn't set).")
 }
 
 fn parse(raw: Vec<String>) -> Result<Args, VmmError> {
@@ -359,6 +367,75 @@ fn run(args: Args) -> Result<Out, VmmError> {
                 updated: true,
                 from,
                 to: Some(job.release.tag.clone()),
+                message: message.clone(),
+            };
+            Ok(out(&result, message + "\n"))
+        }
+        ["update", "check"] => {
+            let e = engine();
+            let data = e.data_dir().ok_or_else(no_data_dir)?.to_path_buf();
+            vmm_engine::app_update::check(&data)?;
+            let s = e.app_update_status();
+            let text = match &s.latest {
+                Some(v) => {
+                    format!("Vaexil Mod Manager {v} is available (this is {}). Run `vmm update --yes`.\n", s.current)
+                }
+                None => format!("Vaexil Mod Manager {} is the newest.\n", s.current),
+            };
+            Ok(out(&s, text))
+        }
+        ["update"] => {
+            if !args.yes {
+                return Err(usage(
+                    "Updating installs a newer Vaexil Mod Manager over this one. Run `vmm update --yes` to confirm. \
+                     Nothing was changed.",
+                ));
+            }
+            let e = engine();
+            let data = e.data_dir().ok_or_else(no_data_dir)?.to_path_buf();
+            e.check_can_update_app()?;
+            let from = vmm_engine::app_update::CURRENT.to_string();
+            let Some(release) = vmm_engine::app_update::check(&data)? else {
+                let message = format!("Vaexil Mod Manager {from} is the newest; nothing to do.");
+                let r = schema::AppUpdateResult {
+                    schema_version: SCHEMA_VERSION,
+                    updated: false,
+                    to: from.clone(),
+                    from,
+                    message: message.clone(),
+                };
+                return Ok(out(&r, message + "\n"));
+            };
+            let show = !args.json;
+            let r = vmm_engine::app_update::download(&data, &release, &mut |line| {
+                if show {
+                    eprintln!("{line}");
+                }
+            })
+            .and_then(|installer| {
+                if show {
+                    eprintln!("Installing");
+                }
+                let status = std::process::Command::new(&installer)
+                    .args(vmm_engine::app_update::installer_args(false))
+                    .status()
+                    .map_err(|err| VmmError::new(ErrorCode::Io, format!("Couldn't start the installer: {err}")))?;
+                if status.success() {
+                    Ok(format!(
+                        "Vaexil Mod Manager {} is installed. An open window uses it once reopened.",
+                        release.version
+                    ))
+                } else {
+                    Err(VmmError::new(ErrorCode::Io, format!("The installer stopped with {status}.")))
+                }
+            });
+            e.note_app_update(&r);
+            let message = r?;
+            let result = schema::AppUpdateResult {
+                schema_version: SCHEMA_VERSION,
+                updated: true,
+                from,
+                to: release.version.clone(),
                 message: message.clone(),
             };
             Ok(out(&result, message + "\n"))

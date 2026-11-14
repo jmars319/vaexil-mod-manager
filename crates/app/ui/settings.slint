@@ -101,6 +101,18 @@ export global SettingsState {
     callback steam-confirm();
     callback steam-cancel();
     callback steam-disconnect();
+    // Vaexil Mod Manager's own updates.
+    in property <string> app-status;
+    // For the badge: "current", "available" or "unchecked".
+    in property <string> app-state;
+    in property <bool> app-busy;
+    in property <bool> app-confirming;
+    in property <string> app-note;
+    in property <bool> app-note-error;
+    callback app-check();
+    callback app-update();
+    callback app-confirm();
+    callback app-cancel();
     // Simple Mod Framework updates.
     in property <string> smf-status;
     // For the badge: "current", "available", "held", "unchecked" or "unknown".
@@ -480,6 +492,64 @@ export component SettingsSheet inherits Sheet {
                 if SettingsState.steam-note != "": Note {
                     text: SettingsState.steam-note;
                     error: SettingsState.steam-note-error;
+                }
+            }
+
+            // Vaexil Mod Manager itself
+            Card {
+                title: "Vaexil Mod Manager";
+                description: "New versions come from the shared release feed on GitHub. Updating checks the installer against the feed's SHA-256, installs it, and reopens the app.";
+                badge: SettingsState.app-busy ? "Working"
+                    : SettingsState.app-state == "current" ? "Up to date"
+                    : SettingsState.app-state == "available" ? "Update available"
+                    : "Not checked";
+                tone: SettingsState.app-busy ? "busy"
+                    : SettingsState.app-state == "current" ? "ok"
+                    : SettingsState.app-state == "available" ? "warn"
+                    : "off";
+                Text {
+                    text: SettingsState.app-status;
+                    font-size: 12px;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                if SettingsState.app-confirming: Confirm {
+                    heading: "Confirm: update Vaexil Mod Manager";
+                    Text {
+                        text: "This downloads the installer, checks it against the SHA-256 the feed gives, closes this window, installs, and reopens it. Your mods, setups and settings stay. An AI app's open session keeps its current tools until you start a new one.";
+                        font-size: 12px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        Button {
+                            text: "Cancel";
+                            accessible-label: "Cancel updating Vaexil Mod Manager";
+                            clicked => { SettingsState.app-cancel(); }
+                        }
+                        Button {
+                            text: "Update and reopen";
+                            primary: true;
+                            clicked => { SettingsState.app-confirm(); }
+                        }
+                    }
+                }
+                if !SettingsState.app-confirming && !SettingsState.app-busy: Actions {
+                    Button {
+                        text: "Check for updates";
+                        accessible-label: "Check for Vaexil Mod Manager updates";
+                        clicked => { SettingsState.app-check(); }
+                    }
+                    if SettingsState.app-state == "available": Button {
+                        text: "Update…";
+                        accessible-label: "Update Vaexil Mod Manager";
+                        clicked => { SettingsState.app-update(); }
+                    }
+                }
+                if SettingsState.app-note != "": Note {
+                    text: SettingsState.app-note;
+                    error: SettingsState.app-note-error;
+                    quiet: SettingsState.app-busy;
                 }
             }
 
