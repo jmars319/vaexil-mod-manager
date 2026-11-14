@@ -56,6 +56,9 @@ Name: "{autodesktop}\Vaexil Mod Manager"; Filename: "{app}\vaexil-mod-manager.ex
 
 [Run]
 Filename: "{app}\vaexil-mod-manager.exe"; Description: "Open Vaexil Mod Manager"; Flags: nowait postinstall skipifsilent; Check: not WindowWasOpen
+; The app's own update runs this installer silently with /relaunch=1 after
+; closing itself, and expects to be reopened.
+Filename: "{app}\vaexil-mod-manager.exe"; Flags: nowait; Check: Relaunch
 
 [UninstallDelete]
 ; Copies set aside while they were running (see [Code]). Otherwise this
@@ -71,6 +74,11 @@ var
 function WindowWasOpen: Boolean;
 begin
   Result := WindowOpen;
+end;
+
+function Relaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
 end;
 
 { Deletes copies set aside by an earlier install, where nothing runs them now. }

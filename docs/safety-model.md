@@ -49,6 +49,8 @@ The deploy report ("Report" in the window, `vmm deploy-report`, and the `get_dep
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-updates\` | While an SMF update runs. | The download (`Release-<version>.zip`, through `.part` until complete) and its unpacked `staging` folder, both removed when the update is done. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-backups\` | Before an SMF update, and before setting aside a stale `cleanThumbs.dat`. | Copies of the files replaced. The newest 2 update backups are kept. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-updating` | While an SMF update runs. | The time it started. While it is there (and under two hours old), Deploy and Play wait; it is removed when the update ends. |
+| Vaexil Mod Manager's own install folder (`%LOCALAPPDATA%\Programs\Vaexil Mod Manager`) | Only when you press "Update…" on the Vaexil Mod Manager card in Settings and confirm "Update and reopen", or run `vmm update --yes`. Refused during a deploy or an SMF update. | The installer named by the release feed's `release.json`, downloaded only from that feed's own `vaexil-mod-manager-v*` releases and run only if it matches the manifest's SHA-256 (the installers are unsigned). It runs silently; a file in use, such as an AI session's `vmm.exe`, is renamed aside (`*.old-<time>`) rather than closed, and those copies are deleted at the next install. The window closes and the installer reopens it. `crates/engine/src/app_update.rs`, `packaging/installer.iss`. |
+| `%LOCALAPPDATA%\Vaexil Mod Manager\app-update.json`, `app-updates\` | When the release feed is checked, and when you update. | The last check (this version, a newer release if any, when), and the downloaded installer; only the newest one is kept. |
 | `%LOCALAPPDATA%\Vaexil Mod Manager\smf-update.json`, `smf-versions.json` | When SMF's releases are checked, and after an update. | The last check (installed and newest version, when), and the SHA-256 of each `Deploy.exe` this app installed with its version, so a release the built-in table doesn't list is still named. |
 
 Enforcement:
@@ -74,7 +76,11 @@ Nothing else is started.
 
 ## Not done, by design
 
-- No network access except to GitHub for SMF, through Windows' own WinHTTP, HTTPS only: reading SMF's release list (`api.github.com`), when you check, when `vmm smf check` runs, or once a day when the window opens on a real install; and downloading a release, only when you update. Nothing about you or your mods is sent; the request names only the app and its version. `vmm mcp` makes no network call. CI's dependency policy still bans HTTP and TLS crates.
+- No network access except to GitHub, through Windows' own WinHTTP, HTTPS only:
+  - for SMF: reading its release list (`api.github.com`) when you check, when `vmm smf check` runs, or once a day when the window opens on a real install; and downloading a release, only when you update;
+  - for Vaexil Mod Manager itself: reading `vaexil-mod-manager-latest/release.json` in JAMARQ-Digital-LLC/jamarq-releases at the same times (or `vmm update check`); and downloading the installer it names, only when you update.
+
+  Nothing about you or your mods is sent; the request names only the app and its version. `vmm mcp` makes no network call. CI's dependency policy still bans HTTP and TLS crates.
 - No telemetry or accounts.
 - No changes to anything else inside HITMAN's folder or SMF's folder by the app itself: not SMF's code or mods, and no `config.json` key besides `loadOrder` and `modOptions`. What `Deploy.exe` writes when it deploys is SMF's own work, as when SMF's Mod Manager runs it. Never a save game.
 - Nothing is ever sent to SMF's authors or its repository.

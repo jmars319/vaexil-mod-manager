@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "current": {
+      "type": "string",
+      "description": "This build's version."
+    },
+    "latest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A newer release, if the last check found one."
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its installer, in the shared release feed."
+    },
+    "checkedAtMs": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0,
+      "description": "When the feed was last checked; absent when never."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "current"
+  ],
+  "description": "`vmm update check`: whether a newer Vaexil Mod Manager is out.",
+  "title": "AppUpdateStatus",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

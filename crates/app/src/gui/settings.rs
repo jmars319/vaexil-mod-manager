@@ -63,6 +63,7 @@ fn show(ui: &AppWindow, state: &State) {
     let ss = ui.global::<SettingsState>();
     show_steam(ui, state);
     show_smf(ui, state);
+    super::app_update::show(ui, state);
     ss.set_ai_changes(state.engine.ai_changes_allowed());
     super::ai_apps::show(ui, &state.engine);
     let exe = cli_path::cli_exe();
@@ -216,6 +217,7 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
         }
     }
     wire_smf(ui, state);
+    super::app_update::wire(ui, state);
     super::ai_apps::wire(ui);
     {
         let weak = ui.as_weak();

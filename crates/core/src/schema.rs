@@ -725,6 +725,32 @@ pub struct SmfUpdateResult {
     pub message: String,
 }
 
+/// `vmm update check`: whether a newer Vaexil Mod Manager is out.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateStatus {
+    pub schema_version: u32,
+    /// This build's version.
+    pub current: String,
+    /// A newer release, if the last check found one.
+    pub latest: Option<String>,
+    /// Its installer, in the shared release feed.
+    pub url: Option<String>,
+    /// When the feed was last checked; absent when never.
+    pub checked_at_ms: Option<u64>,
+}
+
+/// `vmm update --yes`: what happened.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateResult {
+    pub schema_version: u32,
+    pub updated: bool,
+    pub from: String,
+    pub to: String,
+    pub message: String,
+}
+
 /// `vmm deploy-report`: the last deploy, or none yet.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -786,6 +812,8 @@ pub fn all() -> Vec<(&'static str, schemars::Schema)> {
         ("play-result", schemars::schema_for!(PlayResult)),
         ("smf-update-status", schemars::schema_for!(SmfUpdateStatus)),
         ("smf-update-result", schemars::schema_for!(SmfUpdateResult)),
+        ("app-update-status", schemars::schema_for!(AppUpdateStatus)),
+        ("app-update-result", schemars::schema_for!(AppUpdateResult)),
         ("diagnosis", schemars::schema_for!(Diagnosis)),
     ]
 }
