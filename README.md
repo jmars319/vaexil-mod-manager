@@ -62,7 +62,7 @@ After a release build, these check that the window repaints after minimize/resto
 ./scripts/smoke-mouse-clicks.ps1
 ```
 
-`scripts/package.ps1` builds the portable zip and, when Inno Setup 6 is installed, the per-user installer into `dist/`. Releases: a `v*` tag builds those into a draft GitHub release. Publishing the draft also copies the installer to [jamarq-releases](https://github.com/JAMARQ-Digital-LLC/jamarq-releases) as `vaexil-mod-manager-<version>-x64-setup.exe`, where `vaexil-mod-manager-latest/release.json` names the newest one and its SHA-256 (`.github/workflows/publish-feed.yml`).
+`scripts/package.ps1` builds the portable zip and, when Inno Setup 6 is installed, the per-user installer into `dist/`. The installer works while Vaexil Mod Manager or an AI app's `vmm mcp` is running: it renames the file in use aside (`*.old-<time>`), puts the new one in place, and deletes set-aside copies at the next install once nothing runs them. The running copies carry on until they are closed. Releases: a `v*` tag builds those into a draft GitHub release. Publishing the draft also copies the installer to [jamarq-releases](https://github.com/JAMARQ-Digital-LLC/jamarq-releases) as `vaexil-mod-manager-<version>-x64-setup.exe`, where `vaexil-mod-manager-latest/release.json` names the newest one and its SHA-256 (`.github/workflows/publish-feed.yml`).
 
 ## Safety
 

@@ -34,6 +34,10 @@ UninstallDisplayName=Vaexil Mod Manager
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Files in use are set aside by [Code] below instead of closing what holds
+; them: an AI app's session runs vmm.exe as its MCP server for as long as it
+; is open, and the window may be mid-deploy.
+CloseApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
@@ -51,8 +55,65 @@ Name: "{autoprograms}\Vaexil Mod Manager"; Filename: "{app}\vaexil-mod-manager.e
 Name: "{autodesktop}\Vaexil Mod Manager"; Filename: "{app}\vaexil-mod-manager.exe"; IconFilename: "{app}\vaexil-mod-manager.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\vaexil-mod-manager.exe"; Description: "Open Vaexil Mod Manager"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\vaexil-mod-manager.exe"; Description: "Open Vaexil Mod Manager"; Flags: nowait postinstall skipifsilent; Check: not WindowWasOpen
 
-; This version writes nothing outside its install folder, and never writes
-; inside HITMAN's folder or Simple Mod Framework's, so uninstall has nothing
-; else to clean up.
+[UninstallDelete]
+; Copies set aside while they were running (see [Code]). Otherwise this
+; version writes nothing outside its install folder, and never writes inside
+; HITMAN's folder or Simple Mod Framework's, so uninstall has nothing else to
+; clean up.
+Type: files; Name: "{app}\*.old-*"
+
+[Code]
+var
+  WindowOpen: Boolean;
+
+function WindowWasOpen: Boolean;
+begin
+  Result := WindowOpen;
+end;
+
+{ Deletes copies set aside by an earlier install, where nothing runs them now. }
+procedure DeleteOldCopies;
+var
+  Found: TFindRec;
+begin
+  if FindFirst(ExpandConstant('{app}\*.old-*'), Found) then
+  try
+    repeat
+      DeleteFile(ExpandConstant('{app}\') + Found.Name);
+    until not FindNext(Found);
+  finally
+    FindClose(Found);
+  end;
+end;
+
+{ Windows won't replace or delete a running exe, but it will rename one.
+  So a file in use is renamed aside, keeps running from its new name, and
+  the new file goes in under the real name. Returns whether it was in use. }
+function SetAsideIfInUse(Name: String): Boolean;
+var
+  Path: String;
+begin
+  Result := False;
+  Path := ExpandConstant('{app}\') + Name;
+  if FileExists(Path) and not DeleteFile(Path) then
+  begin
+    Result := True;
+    if not RenameFile(Path, Path + '.old-' + GetDateTimeString('yyyymmddhhnnss', #0, #0)) then
+      Log('Could not set aside ' + Path + '; Setup will report it if the copy fails.');
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    DeleteOldCopies;
+    { An AI app's open session keeps its vmm.exe; new sessions get the new one. }
+    SetAsideIfInUse('vmm.exe');
+    WindowOpen := SetAsideIfInUse('vaexil-mod-manager.exe');
+  end;
+  if (CurStep = ssDone) and WindowOpen and not WizardSilent then
+    MsgBox('Vaexil Mod Manager is open. It keeps running the version it started with; close and reopen it to use the new one.', mbInformation, MB_OK);
+end;
