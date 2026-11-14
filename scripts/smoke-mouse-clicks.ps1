@@ -120,6 +120,19 @@ function Scroll-To($window, $name) {
     $null
 }
 
+# Scrolls on by $notches mouse-wheel notches, as Scroll-To does.
+function Scroll-More($window, $notches) {
+    $h = [IntPtr]$window.Current.NativeWindowHandle
+    $b = $window.Current.BoundingRectangle
+    $x = [int]($b.X + $b.Width / 2); $y = [int]($b.Y + $b.Height / 2)
+    $l = [IntPtr](($y -shl 16) -bor ($x -band 0xffff))
+    for ($k = 0; $k -lt $notches; $k++) {
+        [SmokeClicks]::PostMessage($h, 0x020A, [IntPtr](-7864320), $l) | Out-Null   # WM_MOUSEWHEEL, one notch down
+        Start-Sleep -Milliseconds 150
+    }
+    Start-Sleep -Milliseconds 300
+}
+
 function Check($label, [bool] $ok) {
     if (-not $ok) { $script:failed = $true; Save-Shot $label }
     '{0,-46} {1}' -f $label, $(if ($ok) { 'ok' } else { 'FAIL' })
@@ -392,7 +405,11 @@ try {
     # "Copy diagnostics" replaces the clipboard, so only on CI, never on a
     # developer's machine.
     if ($env:CI) {
-        Click $window (Scroll-To $window 'Copy diagnostics')
+        # The last card: scroll on to the end of the sheet, so the button is
+        # wholly in view and not clipped at the bottom edge.
+        $copy = Scroll-To $window 'Copy diagnostics'
+        Scroll-More $window 6
+        Click $window (Find-Control $window 'Copy diagnostics')
         Start-Sleep -Milliseconds 800
         $copied = try { Get-Clipboard -Raw | ConvertFrom-Json } catch { $null }
         Check 'settings: Copy diagnostics copies the JSON' ($copied -and $copied.schemaVersion -eq 1 -and $copied.status.installed -gt 0)
