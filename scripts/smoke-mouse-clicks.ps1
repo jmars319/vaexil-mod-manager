@@ -111,9 +111,19 @@ function Scroll-To($window, $name) {
     [SmokeClicks]::PostMessage($h, 0x0200, [IntPtr]0, [IntPtr](($pt.Y -shl 16) -bor ($pt.X -band 0xffff))) | Out-Null   # WM_MOUSEMOVE
     Start-Sleep -Milliseconds 120
     $byName = New-Object System.Windows.Automation.PropertyCondition ($A::NameProperty), $name
-    for ($k = 0; $k -lt 20; $k++) {
+    for ($k = 0; $k -lt 60; $k++) {
         $c = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byName)
-        if ($c) { return $c }
+        if ($c -and $k -eq 0) { return $c }
+        if ($c) {
+            # It came into view at the bottom edge, where part of it can be
+            # clipped: scroll on a little so a click lands on it.
+            foreach ($n in 1..2) {
+                [SmokeClicks]::PostMessage($h, 0x020A, [IntPtr](-7864320), $l) | Out-Null   # WM_MOUSEWHEEL, one notch down
+                Start-Sleep -Milliseconds 200
+            }
+            Start-Sleep -Milliseconds 300
+            return $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byName)
+        }
         [SmokeClicks]::PostMessage($h, 0x020A, [IntPtr](-7864320), $l) | Out-Null   # WM_MOUSEWHEEL, one notch down
         Start-Sleep -Milliseconds 250
     }
@@ -183,6 +193,11 @@ $psi.Environment['VAEXIL_MOD_MANAGER_DATA'] = $data
 $fakeSteam = Join-Path $work 'steam'
 New-Item -ItemType Directory -Force $fakeSteam | Out-Null
 $psi.Environment['VAEXIL_MOD_MANAGER_STEAM'] = $fakeSteam
+# And an empty folder for the AI apps, so Settings never runs the real
+# Claude Code, Gemini CLI or Codex CLI from a test.
+$fakeAi = Join-Path $work 'ai-apps'
+New-Item -ItemType Directory -Force $fakeAi | Out-Null
+$psi.Environment['VAEXIL_MOD_MANAGER_AI_APPS'] = $fakeAi
 $p = [System.Diagnostics.Process]::Start($psi)
 try {
     $window = $null

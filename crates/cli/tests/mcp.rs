@@ -102,6 +102,18 @@ fn an_ai_client_can_read_everything_and_change_only_when_allowed() {
     assert_eq!(init["serverInfo"]["name"], "vaexil-mod-manager");
     assert!(init["instructions"].as_str().unwrap().contains("Change nothing on your own initiative"));
     s.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    // The connection is recorded, by the client's name, for Settings.
+    let logs: String = std::fs::read_dir(tmp.path().join("data/logs"))
+        .unwrap()
+        .flatten()
+        .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+        .collect();
+    assert!(
+        logs.lines().any(|l| l.contains("\"mcp.client_seen\"")
+            && l.contains("\"mcp:test-client\"")
+            && l.contains("test-client 1.0")),
+        "{logs}"
+    );
 
     // Every tool is listed with schemas; only apply_plan may change anything.
     let tools = s.request("tools/list", json!({}))["tools"].as_array().unwrap().clone();

@@ -203,6 +203,13 @@
       "hint": "Wait for the update to finish, then try again.",
       "retryable": true,
       "exitCode": 5
+    },
+    {
+      "code": "ai_app.unavailable",
+      "meaning": "That AI app isn't installed here, or can't do this from here.",
+      "hint": "Install the AI app, or send it the request yourself from the app.",
+      "retryable": false,
+      "exitCode": 3
     }
   ]
 }

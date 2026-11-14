@@ -7,6 +7,33 @@
 import { ScrollView } from "std-widgets.slint";
 import { Button, ButtonRow, Sheet, Switch, Theme } from "theme.slint";
 
+/// One AI app in Settings' AI tools card.
+export struct AiAppRow {
+    name: string,
+    found: bool,
+    // Where it was found, or where to get it.
+    detail: string,
+    badge: string,
+    // "ok", "warn", "bad", "busy" or "off", as Badge takes.
+    tone: string,
+    // In the app's settings (connected, added, or failed to start).
+    connected: bool,
+    // It can run the test request itself; otherwise the user sends it.
+    can-test: bool,
+    busy: bool,
+    last-used: string,
+    note: string,
+    note-error: bool,
+}
+
+/// A request to send an AI app, in Settings' list.
+export struct RequestItem {
+    group: string,
+    text: string,
+    // Needs "Let AI tools make changes".
+    change: bool,
+}
+
 export global SettingsState {
     // The full path of vmm.exe, or empty when it isn't beside the app.
     in property <string> cli-exe;
@@ -26,10 +53,36 @@ export global SettingsState {
     in-out property <bool> ai-changes;
     in property <string> ai-note;
     callback set-ai-changes(on: bool);
-    // Each AI app's own command for adding vmm's MCP server.
-    in property <string> claude-command;
-    in property <string> gemini-command;
-    in property <string> codex-command;
+    // Each AI app: found, connected, last used.
+    in property <[AiAppRow]> ai-apps;
+    // The app whose Connect or Disconnect is being confirmed, or -1.
+    in property <int> ai-confirming: -1;
+    in property <bool> ai-confirm-remove;
+    // The exact command it will run.
+    in property <string> ai-confirm-command;
+    in property <string> ai-test-request;
+    callback ai-connect(int);
+    callback ai-disconnect(int);
+    callback ai-confirm();
+    callback ai-cancel();
+    callback ai-check(int);
+    callback ai-test(int);
+    callback ai-sent-test(int);
+    // Requests to send an AI app, with Copy.
+    in property <[RequestItem]> requests: [
+        { group: "Look", text: "Use vaexil-mod-manager to tell me which mods are on, in load order." },
+        { group: "Look", text: "Use vaexil-mod-manager: has anything changed since my last deploy?" },
+        { group: "Look", text: "Use vaexil-mod-manager to explain the warnings in my last deploy report." },
+        { group: "Look", text: "Use vaexil-mod-manager to check my load order for broken rules and suggest a fix." },
+        { group: "Look", text: "Use vaexil-mod-manager to show the options of <mod name> and which are chosen." },
+        { group: "Change", text: "Use vaexil-mod-manager to turn off <mod name>. Show me the plan before applying it.", change: true },
+        { group: "Change", text: "Use vaexil-mod-manager to choose <option> for <mod name>. Show me the plan first.", change: true },
+        { group: "Change", text: "Use vaexil-mod-manager to save my current mods as a setup called <name>.", change: true },
+        { group: "After a game update", text: "Use vaexil-mod-manager to start a compatibility pass with every mod off.", change: true },
+        { group: "After a game update", text: "Use vaexil-mod-manager to try these mods as the next batch: <mods>.", change: true },
+        { group: "After a game update", text: "Use vaexil-mod-manager to mark the current batch as good, then suggest the next one.", change: true },
+        { group: "Deploy", text: "Use vaexil-mod-manager to deploy my mods and tell me when it's done.", change: true },
+    ];
     // Filled just before "Copy diagnostics" copies it.
     in property <string> diagnostics;
     in property <string> diagnostics-note;
@@ -194,37 +247,165 @@ component Actions inherits HorizontalLayout {
     spacing: 8px;
 }
 
-component CommandLine inherits VerticalLayout {
-    in property <string> app;
-    in property <string> command;
-    spacing: 4px;
-    Text {
-        text: root.app;
-        font-size: 12px;
-        font-weight: 600;
-        color: Theme.text;
-    }
-    // Read-only text that wraps, so the whole command shows and can be
-    // selected and copied with Ctrl+C.
-    Rectangle {
-        border-radius: 6px;
-        background: Theme.surface;
-        border-width: 1px;
-        border-color: Theme.surface-border;
-        min-height: field.preferred-height + 12px;
-        field := TextInput {
-            x: 8px;
-            y: 6px;
-            width: parent.width - 16px;
-            text: root.command;
-            read-only: true;
+/// One AI app: where it is, whether it is connected, and its buttons.
+component AiAppItem inherits Rectangle {
+    in property <AiAppRow> app;
+    in property <int> index;
+    border-radius: 10px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.surface-border;
+    accessible-role: groupbox;
+    accessible-label: root.app.name;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.app.name;
+                font-size: 13px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                Badge { text: root.app.badge; tone: root.app.tone; }
+            }
+        }
+        Text {
+            text: root.app.detail;
+            font-size: 12px;
+            color: Theme.secondary-text;
+            wrap: word-wrap;
+        }
+        if root.app.last-used != "": Text {
+            text: root.app.last-used;
+            font-size: 12px;
+            color: Theme.ready;
+            wrap: word-wrap;
+        }
+        if SettingsState.ai-confirming == root.index: Confirm {
+            heading: SettingsState.ai-confirm-remove ? "Confirm: remove Vaexil Mod Manager from " + root.app.name
+                : "Confirm: connect " + root.app.name;
+            Text {
+                text: "This runs " + root.app.name + "'s own command:";
+                font-size: 12px;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Mono { text: SettingsState.ai-confirm-command; }
+            Text {
+                text: SettingsState.ai-confirm-remove
+                    ? "Only Vaexil Mod Manager's entry is removed from " + root.app.name + "'s settings."
+                    : root.app.name + " adds Vaexil Mod Manager to its own settings, for all your projects. Sessions started afterwards can read your mods; changes still need \u{201c}Let AI tools make changes\u{201d} above. You can remove it here.";
+                font-size: 12px;
+                color: Theme.secondary-text;
+                wrap: word-wrap;
+            }
+            ButtonRow {
+                Button {
+                    text: "Cancel";
+                    accessible-label: "Cancel, " + root.app.name;
+                    clicked => { SettingsState.ai-cancel(); }
+                }
+                Button {
+                    text: SettingsState.ai-confirm-remove ? "Remove" : "Connect";
+                    accessible-label: (SettingsState.ai-confirm-remove ? "Remove from " : "Connect ") + root.app.name + " now";
+                    primary: true;
+                    clicked => { SettingsState.ai-confirm(); }
+                }
+            }
+        }
+        if SettingsState.ai-confirming != root.index && root.app.found && !root.app.busy: Actions {
+            if !root.app.connected: Button {
+                text: "Connect…";
+                accessible-label: "Connect " + root.app.name;
+                clicked => { SettingsState.ai-connect(root.index); }
+            }
+            if root.app.connected && root.app.can-test: Button {
+                text: "Test it";
+                accessible-label: "Test " + root.app.name;
+                clicked => { SettingsState.ai-test(root.index); }
+            }
+            if root.app.connected && !root.app.can-test: Button {
+                text: "Copy a test request";
+                accessible-label: "Copy a test request for " + root.app.name;
+                clicked => {
+                    test-field.select-all();
+                    test-field.copy();
+                    test-field.clear-selection();
+                    SettingsState.ai-sent-test(root.index);
+                }
+            }
+            Button {
+                text: "Check";
+                accessible-label: "Check " + root.app.name;
+                clicked => { SettingsState.ai-check(root.index); }
+            }
+            if root.app.connected: Button {
+                text: "Remove…";
+                accessible-label: "Remove Vaexil Mod Manager from " + root.app.name;
+                clicked => { SettingsState.ai-disconnect(root.index); }
+            }
+        }
+        if root.app.note != "": Note { text: root.app.note; error: root.app.note-error; quiet: !root.app.note-error; }
+        // Holds the test request only to copy it; never shown.
+        // Wrapped, so its long text never widens the sheet.
+        test-field := TextInput {
+            visible: false;
+            height: 0px;
             single-line: false;
             wrap: word-wrap;
-            font-family: Theme.font-mono;
-            font-size: 12px;
-            color: Theme.text;
-            accessible-label: root.app + " command";
+            text: SettingsState.ai-test-request;
+            read-only: true;
+            accessible-role: none;
         }
+    }
+}
+
+/// One request, with Copy.
+component RequestRow inherits HorizontalLayout {
+    in property <RequestItem> item;
+    property <bool> copied;
+    spacing: 10px;
+    Text {
+        text: root.item.text;
+        font-size: 12px;
+        color: Theme.text;
+        wrap: word-wrap;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+    if root.item.change: VerticalLayout {
+        alignment: center;
+        Badge { text: "Changes"; tone: "warn"; }
+    }
+    VerticalLayout {
+        alignment: center;
+        Button {
+            text: root.copied ? "Copied" : "Copy";
+            font-size: 12px;
+            accessible-label: "Copy: " + root.item.text;
+            clicked => {
+                field.select-all();
+                field.copy();
+                field.clear-selection();
+                root.copied = true;
+            }
+        }
+    }
+    // Holds the request only to copy it; never shown.
+    field := TextInput {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        single-line: false;
+        wrap: word-wrap;
+        text: root.item.text;
+        read-only: true;
+        accessible-role: none;
     }
 }
 
@@ -387,7 +568,7 @@ export component SettingsSheet inherits Sheet {
                     wrap: word-wrap;
                 }
                 if SettingsState.ai-note != "": Note { text: SettingsState.ai-note; error: true; }
-                if SettingsState.cli-exe != "": VerticalLayout {
+                VerticalLayout {
                     spacing: 8px;
                     padding-top: 4px;
                     Text {
@@ -397,14 +578,28 @@ export component SettingsSheet inherits Sheet {
                         color: Theme.text;
                     }
                     Text {
-                        text: "Run the line for your app in a terminal. It is that app's own command for adding a server; Vaexil Mod Manager doesn't edit other apps' settings.";
+                        text: "Connect runs the AI app's own command for adding a server, after showing it to you; Vaexil Mod Manager doesn't edit other apps' settings. Check asks the app whether the connection works, and the line in green shows the last time it really reached Vaexil Mod Manager.";
                         font-size: 12px;
                         color: Theme.secondary-text;
                         wrap: word-wrap;
                     }
-                    CommandLine { app: "Claude Code"; command: SettingsState.claude-command; }
-                    CommandLine { app: "Gemini CLI"; command: SettingsState.gemini-command; }
-                    CommandLine { app: "Codex CLI"; command: SettingsState.codex-command; }
+                    for app[i] in SettingsState.ai-apps: AiAppItem { app: app; index: i; }
+                }
+            }
+
+            // Requests to try
+            Card {
+                title: "Requests to try";
+                description: "Copy one, fill in anything in <angle brackets>, and send it to your AI app. Those marked Changes need \u{201c}Let AI tools make changes\u{201d}; the AI shows you the plan before applying it.";
+                for item[i] in SettingsState.requests: VerticalLayout {
+                    spacing: 6px;
+                    if i == 0 || SettingsState.requests[i - 1].group != item.group: Text {
+                        text: item.group;
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: Theme.secondary-text;
+                    }
+                    RequestRow { item: item; }
                 }
             }
 
@@ -493,6 +688,8 @@ export component SettingsSheet inherits Sheet {
                 diag-field := TextInput {
                     visible: false;
                     height: 0px;
+                    single-line: false;
+                    wrap: word-wrap;
                     text: SettingsState.diagnostics;
                     read-only: true;
                     accessible-role: none;

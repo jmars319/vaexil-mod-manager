@@ -42,7 +42,7 @@ Add `--json` to any command for one JSON object in the shapes under [`schema/`](
 
 ## AI apps
 
-`vmm mcp` is an MCP server, so Claude Code, Gemini CLI, Codex CLI or another MCP client can read your mods and, when you ask, change them through structured tools rather than screen control. It works over stdio only and makes no network connection. Changes from AI tools are off until you turn on "Let AI tools make changes" in Settings, and each one is recorded with your request. Setup and the tool list are in [docs/ai.md](docs/ai.md).
+`vmm mcp` is an MCP server, so Claude Code, Gemini CLI, Codex CLI or another MCP client can read your mods and, when you ask, change them through structured tools rather than screen control. It works over stdio only and makes no network connection. Changes from AI tools are off until you turn on "Let AI tools make changes" in Settings, and each one is recorded with your request. Settings connects Claude Code, Gemini CLI or Codex CLI with one button (running that app's own command after showing it), checks the connection, and lists requests to try. Setup and the tool list are in [docs/ai.md](docs/ai.md).
 
 ## Build from source
 

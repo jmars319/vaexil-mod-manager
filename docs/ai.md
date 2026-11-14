@@ -4,7 +4,17 @@ Vaexil Mod Manager has an MCP server, `vmm mcp`. Through it, an AI app such as C
 
 ## Connect an app
 
-Settings in Vaexil Mod Manager shows these lines with the real path filled in. Run the line for your app once, in a terminal:
+In Vaexil Mod Manager, open Settings. Under **AI tools**, each AI app it finds has its own row:
+
+- **Connect…** shows the exact command it will run, which is that app's own command for adding a server, and runs it when you confirm. Vaexil Mod Manager finds the app where it is really installed, not only on PATH: Claude Code may exist only inside the Claude desktop app, where a `claude` typed in a terminal isn't found.
+- **Check** asks the app whether it has the server. Claude Code and Gemini CLI start it to check; Codex CLI only says whether it is added and turned on. Gemini CLI uses MCP servers only in folders you have trusted in Gemini CLI, so it can show **Added, needs a trusted folder**.
+- **Test it** (Claude Code installed on its own) asks Claude once, using your plan, to read your status through Vaexil Mod Manager, allowing only that one tool. Where that isn't possible (the copy inside the Claude desktop app, Gemini CLI, Codex CLI), **Copy a test request** copies a request to paste into a new session of that app.
+- The green line shows the last time each app really reached Vaexil Mod Manager. `vmm mcp` records the name and version each AI app gives when it connects.
+- **Remove…** runs the app's own command for removing the server.
+
+**Requests to try**, below it, lists requests to copy and send, such as "which mods are on" or "start a compatibility pass with every mod off".
+
+To do it by hand instead, run the line for your app once, in a terminal:
 
 ```
 claude mcp add --scope user vaexil-mod-manager -- "C:\path\to\vmm.exe" mcp
@@ -12,7 +22,7 @@ gemini mcp add --scope user vaexil-mod-manager "C:\path\to\vmm.exe" mcp
 codex mcp add vaexil-mod-manager -- "C:\path\to\vmm.exe" mcp
 ```
 
-Each line is that app's own command for adding a server, and it changes only that app's settings. Vaexil Mod Manager doesn't edit other apps' settings. `--scope user` makes the server available in every project rather than only the current one. For another MCP client, the server is the command `vmm.exe` with the single argument `mcp`, over stdio.
+Each line is that app's own command for adding a server, and it changes only that app's settings (Settings' Connect runs the same line). Vaexil Mod Manager doesn't edit other apps' settings. `--scope user` makes the server available in every project rather than only the current one. For another MCP client, the server is the command `vmm.exe` with the single argument `mcp`, over stdio.
 
 ## What an AI app can do
 
