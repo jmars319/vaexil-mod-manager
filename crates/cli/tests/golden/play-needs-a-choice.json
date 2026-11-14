@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "usage.invalid",
     "message": "Your mods changed since the last deploy (or nothing has been deployed from Vaexil Mod Manager yet). Run `vmm play --deploy --yes` to deploy first, or `vmm play --no-deploy` to play the build already in the game.",

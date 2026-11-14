@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "usage.invalid",
     "message": "Applying a plan changes your mods. Run `vmm apply <planId> --yes` to confirm. Nothing was changed.",

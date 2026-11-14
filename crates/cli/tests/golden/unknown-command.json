@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "usage.invalid",
     "message": "Unknown command “frobnicate”. Run `vmm help` for the commands.",

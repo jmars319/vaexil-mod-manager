@@ -54,13 +54,20 @@ pub struct GameArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ModArgs {
+pub struct GetModArgs {
     /// The mod's id, as list_mods gives it.
     #[serde(rename = "mod")]
     pub mod_id: String,
+    /// Only options whose group, label or value contains this (ignoring
+    /// case). Without it, a mod with many options shows the chosen ones.
+    #[serde(default, rename = "optionSearch")]
+    pub option_search: Option<String>,
     #[serde(default)]
     pub game: Option<String>,
 }
+
+/// The most options get_mod returns at once; some mods have thousands.
+const MAX_OPTIONS: usize = 100;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeployArgs {
@@ -167,8 +174,9 @@ impl Vmm {
     }
 
     #[tool(
-        description = "Every mod: id, name, on or off, place in the load order, type, options (with the value to \
-                       choose each), load rules, and which later mods replace its files.",
+        description = "Every mod, short: id, name, on or off, place in the load order (mods that are on come \
+                       first, in load order), type, how many options it has and how many are chosen, and which \
+                       later mods replace its files. For a mod's options, authors and load rules, use get_mod.",
         output_schema = schema_for_output::<ModList>(),
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
@@ -178,13 +186,19 @@ impl Vmm {
     }
 
     #[tool(
-        description = "One mod by its id.",
+        description = "One mod by its id: version, authors, options (with the value to choose each and whether \
+                       it is chosen), load rules, and which later mods replace its files. At most 100 options come \
+                       back: a mod with more shows its chosen ones, and optionSearch finds others by group, label \
+                       or value. optionsLeftOut says how many weren't shown.",
         output_schema = schema_for_output::<ModDetail>(),
         annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
-    async fn get_mod(&self, Parameters(a): Parameters<ModArgs>) -> Result<CallToolResult, McpError> {
+    async fn get_mod(&self, Parameters(a): Parameters<GetModArgs>) -> Result<CallToolResult, McpError> {
         let (e, folder) = engine_for(&a.game);
-        result(e.pick_game(folder.as_deref()).and_then(|g| e.mod_detail(&g, &a.mod_id)))
+        result(e.pick_game(folder.as_deref()).and_then(|g| e.mod_detail(&g, &a.mod_id)).map(|mut d| {
+            d.narrow_options(a.option_search.as_deref(), MAX_OPTIONS);
+            d
+        }))
     }
 
     #[tool(
@@ -350,7 +364,9 @@ impl ServerHandler for Vmm {
 
 /// Serves MCP on stdin and stdout until the client disconnects.
 pub fn serve() -> Result<(), String> {
+    // rmcp times out requests and its shutdown, so the runtime needs timers.
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
         .build()
         .map_err(|e| format!("Couldn't start the MCP server: {e}"))?;
     runtime.block_on(async {

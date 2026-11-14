@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "plan.not_found",
     "message": "There is no plan “<planId>”. It may have been applied already.",

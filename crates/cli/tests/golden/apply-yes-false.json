@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "usage.invalid",
     "message": "--yes takes no value. Nothing was changed.",

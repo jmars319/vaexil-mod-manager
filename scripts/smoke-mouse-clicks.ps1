@@ -391,7 +391,7 @@ try {
         Click $window (Scroll-To $window 'Copy diagnostics')
         Start-Sleep -Milliseconds 800
         $copied = try { Get-Clipboard -Raw | ConvertFrom-Json } catch { $null }
-        Check 'settings: Copy diagnostics copies the JSON' ($copied -and $copied.schemaVersion -eq 1 -and $copied.status.installed -gt 0)
+        Check 'settings: Copy diagnostics copies the JSON' ($copied -and $copied.schemaVersion -eq 2 -and $copied.status.installed -gt 0)
     }
     Click $window (Find-Control $window 'Close settings')
     Start-Sleep -Milliseconds 400

@@ -17,8 +17,8 @@ use vmm_core::error::{ErrorCode, VmmError};
 use vmm_core::game::GameInstall;
 use vmm_core::schema::{
     ApplyReport, BackendState, BackendView, BatchState, BatchView, BrokenRuleView, Change, DeployState, DeployStatus,
-    GameList, GameView, KindSource, LogLevel, ModDetail, ModList, ModView, OptionView, OrderReport, PassView, Plan,
-    PlanStep, Precondition, RelationView, SCHEMA_VERSION, SetupList, SetupView, StatusReport,
+    GameList, GameView, KindSource, LogLevel, ModDetail, ModList, ModSummary, ModView, OptionView, OrderReport,
+    PassView, Plan, PlanStep, Precondition, RelationView, SCHEMA_VERSION, SetupList, SetupView, StatusReport,
 };
 
 use crate::journal::{self, Caller};
@@ -215,21 +215,26 @@ impl Engine {
         report
     }
 
-    pub fn mod_list(&self, game: &GameInstall) -> Result<ModList, VmmError> {
+    /// Every mod in full, in the list's order.
+    fn mod_views(&self, game: &GameInstall) -> Result<Vec<ModView>, VmmError> {
         let inspection = self.readable(game)?;
         let kinds = self.kind_overrides();
         let replaced = vmm_core::order::overridden_by(&enabled_order(&inspection.mods), &inspection.mods);
+        Ok(inspection.mods.iter().map(|m| mod_view(m, &kinds, &replaced)).collect())
+    }
+
+    pub fn mod_list(&self, game: &GameInstall) -> Result<ModList, VmmError> {
+        let mods = self.mod_views(game)?;
         Ok(ModList {
             schema_version: SCHEMA_VERSION,
             game: game_view(game),
-            mods: inspection.mods.iter().map(|m| mod_view(m, &kinds, &replaced)).collect(),
+            mods: mods.iter().map(ModSummary::from).collect(),
         })
     }
 
     pub fn mod_detail(&self, game: &GameInstall, mod_id: &str) -> Result<ModDetail, VmmError> {
-        let list = self.mod_list(game)?;
-        let m = list.mods.into_iter().find(|m| m.id == mod_id).ok_or_else(|| no_such_mod(mod_id))?;
-        Ok(ModDetail { schema_version: SCHEMA_VERSION, game: list.game, mod_view: m })
+        let m = self.mod_views(game)?.into_iter().find(|m| m.id == mod_id).ok_or_else(|| no_such_mod(mod_id))?;
+        Ok(ModDetail { schema_version: SCHEMA_VERSION, game: game_view(game), mod_view: m, options_left_out: 0 })
     }
 
     pub fn order_report(&self, game: &GameInstall) -> Result<OrderReport, VmmError> {
@@ -1049,6 +1054,9 @@ mod tests {
             [("A", true), ("B", false), ("C", false)]
         );
         assert_eq!(engine.mod_detail(&game, "C").unwrap().mod_view.options[0].value, "X");
+        // The list counts options; the detail has them.
+        let c = list.mods.iter().find(|m| m.id == "C").unwrap();
+        assert_eq!(c.option_count, engine.mod_detail(&game, "C").unwrap().mod_view.options.len());
         assert_eq!(engine.mod_detail(&game, "Z").unwrap_err().code, ErrorCode::ModNotFound);
         let order = engine.order_report(&game).unwrap();
         assert_eq!((order.order_name.as_str(), order.order.clone()), ("smf", vec!["A".to_string()]));
