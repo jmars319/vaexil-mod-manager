@@ -241,10 +241,21 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
 type Slot<T> = std::sync::Arc<std::sync::Mutex<Option<T>>>;
 
 /// Runs `work` on a worker thread and hands its result to `done` on the
-/// window's thread, polling every 300 ms; `line` shows progress meanwhile.
+/// window's thread, polling every 300 ms; `line` shows progress meanwhile,
+/// under the SMF card.
 pub(super) fn in_background<T: Send + 'static>(
     ui: &AppWindow,
     work: impl FnOnce(&dyn Fn(String)) -> T + Send + 'static,
+    done: impl Fn(&AppWindow, T) + 'static,
+) {
+    in_background_to(ui, work, |ui, line| ui.global::<SettingsState>().set_smf_note(line.into()), done);
+}
+
+/// As [`in_background`], showing progress lines with `show`.
+pub(super) fn in_background_to<T: Send + 'static>(
+    ui: &AppWindow,
+    work: impl FnOnce(&dyn Fn(String)) -> T + Send + 'static,
+    show: impl Fn(&AppWindow, String) + 'static,
     done: impl Fn(&AppWindow, T) + 'static,
 ) {
     let result: Slot<T> = Default::default();
@@ -263,7 +274,7 @@ pub(super) fn in_background<T: Send + 'static>(
         let Some(ui) = weak.upgrade() else { return };
         let progress = line.lock().expect("progress lock").clone();
         if !progress.is_empty() {
-            ui.global::<SettingsState>().set_smf_note(progress.into());
+            show(&ui, progress);
         }
         if let Some(r) = result.lock().expect("result lock").take() {
             keep.stop();
@@ -275,6 +286,11 @@ pub(super) fn in_background<T: Send + 'static>(
 /// Whether an SMF update is running in this window. Closing the window
 /// would end the process mid-copy, so it stays open until the update ends.
 static UPDATE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this window is updating SMF.
+pub(super) fn smf_update_running() -> bool {
+    UPDATE_RUNNING.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 fn wire_smf(ui: &AppWindow, state: &Rc<State>) {
     let ss = ui.global::<SettingsState>();

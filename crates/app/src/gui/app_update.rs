@@ -8,7 +8,7 @@ use slint::ComponentHandle;
 use vmm_engine::app_update;
 
 use super::State;
-use super::settings::in_background;
+use super::settings::{in_background, in_background_to};
 use crate::{AppWindow, SettingsState};
 
 /// The version line and badge, from the last check.
@@ -96,12 +96,23 @@ pub fn wire(ui: &AppWindow, state: &Rc<State>) {
             note(&ui, format!("Downloading Vaexil Mod Manager {}…", release.version), false);
             let state = state.clone();
             let version = release.version.clone();
-            in_background(
+            in_background_to(
                 &ui,
                 move |line| app_update::download(&data, &release, &mut |l| line(l)),
+                |ui, line| note(ui, line, false),
                 move |ui, r| {
                     let ss = ui.global::<SettingsState>();
-                    let started = r.and_then(|installer| {
+                    // The download took a while: a deploy or an SMF update may
+                    // have started meanwhile, and closing now would cut it off.
+                    let blocked = if super::settings::smf_update_running() {
+                        Err(vmm_core::error::VmmError::new(
+                            vmm_core::error::ErrorCode::SmfUpdating,
+                            "SMF is being updated. Update Vaexil Mod Manager when it has finished; the download is kept.",
+                        ))
+                    } else {
+                        state.engine.check_can_update_app()
+                    };
+                    let started = blocked.and(r).and_then(|installer| {
                         // The installer runs on its own, sets aside any file in
                         // use, and reopens the app; this window closes now.
                         std::process::Command::new(&installer)
