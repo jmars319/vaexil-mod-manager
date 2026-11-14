@@ -8,6 +8,7 @@
 //! folder, and runs deploys. Every change it makes to the game's mod
 //! framework goes through the backend, after a backup.
 
+pub mod ai_apps;
 pub mod contract;
 pub mod crash;
 pub mod deploy;

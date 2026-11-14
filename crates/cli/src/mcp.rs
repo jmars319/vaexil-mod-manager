@@ -13,7 +13,11 @@
 use rmcp::handler::server::common::schema_for_output;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
+use rmcp::model::{
+    CallToolResult, ContentBlock, Implementation, InitializeRequestParams, InitializeResult, ServerCapabilities,
+    ServerConfig,
+};
+use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, Peer, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -359,6 +363,20 @@ impl ServerHandler for Vmm {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("vaexil-mod-manager", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
+    }
+
+    /// Records which AI app connected, so Settings can show that it really
+    /// reached Vaexil Mod Manager ("Last used by Claude Code at ...").
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, McpError> {
+        context.peer.set_peer_info(request.clone());
+        let client = &request.client_info;
+        let name = if client.name.is_empty() { "unknown" } else { client.name.as_str() };
+        Engine::open_as(Caller::Mcp { client: name.to_string() }).note_client(name, &client.version);
+        self.negotiate_initialize(&request)
     }
 }
 

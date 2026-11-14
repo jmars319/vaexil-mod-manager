@@ -68,10 +68,12 @@ pub enum ErrorCode {
     SmfUpdateHeld,
     /// The framework is being updated.
     SmfUpdating,
+    /// An AI app isn't installed here, or can't do what was asked from here.
+    AiAppUnavailable,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 29] = [
+    pub const ALL: [ErrorCode; 30] = [
         ErrorCode::GameNotFound,
         ErrorCode::FrameworkMissing,
         ErrorCode::ConfigUnreadable,
@@ -101,6 +103,7 @@ impl ErrorCode {
         ErrorCode::DownloadMismatch,
         ErrorCode::SmfUpdateHeld,
         ErrorCode::SmfUpdating,
+        ErrorCode::AiAppUnavailable,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -134,6 +137,7 @@ impl ErrorCode {
             ErrorCode::DownloadMismatch => "download.mismatch",
             ErrorCode::SmfUpdateHeld => "smf.update_held",
             ErrorCode::SmfUpdating => "smf.updating",
+            ErrorCode::AiAppUnavailable => "ai_app.unavailable",
         }
     }
 
@@ -171,6 +175,7 @@ impl ErrorCode {
             }
             ErrorCode::SmfUpdateHeld => "SMF's update can't be applied automatically.",
             ErrorCode::SmfUpdating => "SMF is being updated.",
+            ErrorCode::AiAppUnavailable => "That AI app isn't installed here, or can't do this from here.",
         }
     }
 
@@ -224,6 +229,7 @@ impl ErrorCode {
                 "Read SMF's release notes and update it by hand, as SMF's own Mod Manager would ask you to."
             }
             ErrorCode::SmfUpdating => "Wait for the update to finish, then try again.",
+            ErrorCode::AiAppUnavailable => "Install the AI app, or send it the request yourself from the app.",
         }
     }
 
