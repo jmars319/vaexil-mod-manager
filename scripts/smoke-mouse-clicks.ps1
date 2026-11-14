@@ -120,6 +120,19 @@ function Scroll-To($window, $name) {
     $null
 }
 
+# Scrolls on by $notches mouse-wheel notches, as Scroll-To does.
+function Scroll-More($window, $notches) {
+    $h = [IntPtr]$window.Current.NativeWindowHandle
+    $b = $window.Current.BoundingRectangle
+    $x = [int]($b.X + $b.Width / 2); $y = [int]($b.Y + $b.Height / 2)
+    $l = [IntPtr](($y -shl 16) -bor ($x -band 0xffff))
+    for ($k = 0; $k -lt $notches; $k++) {
+        [SmokeClicks]::PostMessage($h, 0x020A, [IntPtr](-7864320), $l) | Out-Null   # WM_MOUSEWHEEL, one notch down
+        Start-Sleep -Milliseconds 150
+    }
+    Start-Sleep -Milliseconds 300
+}
+
 function Check($label, [bool] $ok) {
     if (-not $ok) { $script:failed = $true; Save-Shot $label }
     '{0,-46} {1}' -f $label, $(if ($ok) { 'ok' } else { 'FAIL' })
@@ -356,24 +369,14 @@ try {
     $script:shotWindow = $window
     Click $window (Find-Control $window 'Settings')
     Start-Sleep -Milliseconds 800
-    # The stand-in SMF isn't a release this app can name, so it offers no update.
-    Check 'settings: SMF updates need a named release' ([bool](Find-Control $window 'The installed SMF isn''t a release this app can name, so it can''t be updated from here.'))
-    $add = Scroll-To $window 'Add the command line to my PATH'
-    if ($add) {
-        Click $window $add
-        Start-Sleep -Milliseconds 600
-        Check 'settings: Add first shows what it will change' ([bool](Find-Control $window 'Add to PATH'))
-        Click $window (Find-Control $window 'Close settings')
-        Start-Sleep -Milliseconds 500
-        Click $window (Find-Control $window 'Settings')
-        Start-Sleep -Milliseconds 500
-        Check 'settings: leaving without confirming changes nothing' ([bool](Scroll-To $window 'Add the command line to my PATH') -and [Environment]::GetEnvironmentVariable('Path', 'User') -eq $pathBefore)
-    } else {
-        Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Scroll-To $window 'Take the command line out of my PATH'))
-    }
+    # The cards, top to bottom: Steam's Play button, SMF, AI tools, Command
+    # line, Diagnostics. Scroll-To only scrolls down, so they are checked in
+    # that order.
     # Steam's Play button reads the stand-in Steam, which has no account, so
     # it says so and offers no button.
     Check 'settings: Steam''s Play button finds no account in the stand-in' ([bool](Scroll-To $window 'No Steam account has signed in on this PC, so there are no settings to change.'))
+    # The stand-in SMF isn't a release this app can name, so it offers no update.
+    Check 'settings: SMF updates need a named release' ([bool](Scroll-To $window 'The installed SMF isn''t a release this app can name, so it can''t be updated from here.'))
     # "Let AI tools make changes" is off until switched on, and is kept in
     # the app's settings.json (here the test's throwaway data folder).
     $settingsFile = Join-Path $data 'settings.json'
@@ -385,10 +388,28 @@ try {
     Click $window (Scroll-To $window 'Let AI tools make changes')
     Start-Sleep -Milliseconds 500
     Check 'settings: a second click turns them off' (-not (& $aiOn))
+    $add = Scroll-To $window 'Add the command line to my PATH'
+    if ($add) {
+        Click $window $add
+        Start-Sleep -Milliseconds 600
+        # The confirm panel opens in the card, below the fold at this size.
+        Check 'settings: Add first shows what it will change' ([bool](Scroll-To $window 'Add to PATH'))
+        Click $window (Find-Control $window 'Close settings')
+        Start-Sleep -Milliseconds 500
+        Click $window (Find-Control $window 'Settings')
+        Start-Sleep -Milliseconds 500
+        Check 'settings: leaving without confirming changes nothing' ([bool](Scroll-To $window 'Add the command line to my PATH') -and [Environment]::GetEnvironmentVariable('Path', 'User') -eq $pathBefore)
+    } else {
+        Check 'settings: vmm.exe is beside the app and offered for PATH' ([bool](Scroll-To $window 'Take the command line out of my PATH'))
+    }
     # "Copy diagnostics" replaces the clipboard, so only on CI, never on a
     # developer's machine.
     if ($env:CI) {
-        Click $window (Scroll-To $window 'Copy diagnostics')
+        # The last card: scroll on to the end of the sheet, so the button is
+        # wholly in view and not clipped at the bottom edge.
+        $copy = Scroll-To $window 'Copy diagnostics'
+        Scroll-More $window 6
+        Click $window (Find-Control $window 'Copy diagnostics')
         Start-Sleep -Milliseconds 800
         $copied = try { Get-Clipboard -Raw | ConvertFrom-Json } catch { $null }
         Check 'settings: Copy diagnostics copies the JSON' ($copied -and $copied.schemaVersion -eq 2 -and $copied.status.installed -gt 0)

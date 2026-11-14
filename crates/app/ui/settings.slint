@@ -1,7 +1,11 @@
 // Settings: changes outside VMM happen only from here, after the user has
 // seen exactly what will change (ADR 0003, owner's decision 3).
+//
+// Each subject is a card with its state as a badge, so the sheet reads at a
+// glance. A change that reaches outside the app opens a confirm panel in the
+// card, set apart in the accent colour, and only its primary button acts.
 import { ScrollView } from "std-widgets.slint";
-import { Button, ButtonRow, FieldLabel, Sheet, Switch, Theme } from "theme.slint";
+import { Button, ButtonRow, Sheet, Switch, Theme } from "theme.slint";
 
 export global SettingsState {
     // The full path of vmm.exe, or empty when it isn't beside the app.
@@ -46,6 +50,8 @@ export global SettingsState {
     callback steam-disconnect();
     // Simple Mod Framework updates.
     in property <string> smf-status;
+    // For the badge: "current", "available", "held", "unchecked" or "unknown".
+    in property <string> smf-state;
     in property <bool> smf-can-update;
     in property <bool> smf-busy;
     in property <bool> smf-confirming;
@@ -55,6 +61,137 @@ export global SettingsState {
     callback smf-update();
     callback smf-confirm();
     callback smf-cancel();
+}
+
+// Section building blocks
+
+/// A small state label beside a card's title. `tone` is "ok", "warn",
+/// "bad", "busy" or "off".
+component Badge inherits Rectangle {
+    in property <string> text;
+    in property <string> tone: "off";
+    property <color> ink: root.tone == "ok" ? Theme.ready
+        : root.tone == "warn" ? Theme.warning
+        : root.tone == "bad" ? Theme.danger
+        : root.tone == "busy" ? Theme.running
+        : Theme.secondary-text;
+    height: label.preferred-height + 6px;
+    width: label.preferred-width + 18px;
+    border-radius: self.height / 2;
+    background: root.ink.with-alpha(0.12);
+    border-width: 1px;
+    border-color: root.ink.with-alpha(0.35);
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+    label := Text {
+        text: root.text;
+        font-size: 11px;
+        font-weight: 600;
+        color: root.ink;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        accessible-role: none;
+    }
+}
+
+/// One subject of the sheet: a titled card with its state and a short
+/// description, and its controls below.
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <string> badge;
+    in property <string> tone: "off";
+    border-radius: 12px;
+    background: Theme.window-background;
+    border-width: 1px;
+    border-color: Theme.surface-border;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.title;
+                font-size: 15px;
+                font-weight: 700;
+                color: Theme.text;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            if root.badge != "": VerticalLayout {
+                alignment: center;
+                Badge { text: root.badge; tone: root.tone; }
+            }
+        }
+        if root.description != "": Text {
+            text: root.description;
+            font-size: 13px;
+            color: Theme.secondary-text;
+            wrap: word-wrap;
+        }
+        @children
+    }
+}
+
+/// The second step of a change: what it will do, set apart so the button
+/// that makes it can't be missed.
+component Confirm inherits Rectangle {
+    in property <string> heading;
+    border-radius: 10px;
+    background: Theme.accent.with-alpha(0.08);
+    border-width: 2px;
+    border-color: Theme.accent;
+    accessible-role: groupbox;
+    accessible-label: root.heading;
+    VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+        Text {
+            text: root.heading;
+            font-size: 13px;
+            font-weight: 700;
+            color: Theme.accent;
+            wrap: word-wrap;
+        }
+        @children
+    }
+}
+
+/// A value shown exactly, such as a path or a command line.
+component Mono inherits Rectangle {
+    in property <string> text;
+    border-radius: 6px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.surface-border;
+    min-height: field.preferred-height + 12px;
+    field := Text {
+        x: 8px;
+        width: parent.width - 16px;
+        text: root.text;
+        font-family: Theme.font-mono;
+        font-size: 12px;
+        color: Theme.text;
+        wrap: word-wrap;
+        vertical-alignment: center;
+    }
+}
+
+/// The outcome of the last action in a card.
+component Note inherits Text {
+    in property <bool> error;
+    in property <bool> quiet;
+    font-size: 12px;
+    color: root.error ? Theme.danger : root.quiet ? Theme.secondary-text : Theme.ready;
+    wrap: word-wrap;
+}
+
+/// A line of buttons that starts at the left edge.
+component Actions inherits HorizontalLayout {
+    alignment: start;
+    spacing: 8px;
 }
 
 component CommandLine inherits VerticalLayout {
@@ -70,14 +207,15 @@ component CommandLine inherits VerticalLayout {
     // Read-only text that wraps, so the whole command shows and can be
     // selected and copied with Ctrl+C.
     Rectangle {
-        border-radius: 8px;
-        background: Theme.window-background;
+        border-radius: 6px;
+        background: Theme.surface;
         border-width: 1px;
         border-color: Theme.surface-border;
-        min-height: field.preferred-height + 16px;
+        min-height: field.preferred-height + 12px;
         field := TextInput {
-            x: 10px;
-            width: parent.width - 20px;
+            x: 8px;
+            y: 6px;
+            width: parent.width - 16px;
             text: root.command;
             read-only: true;
             single-line: false;
@@ -92,170 +230,45 @@ component CommandLine inherits VerticalLayout {
 
 export component SettingsSheet inherits Sheet {
     title: "Settings";
-    subtitle: "Changes outside Vaexil Mod Manager happen only from here, and only when you choose them.";
-    panel-width: 600px;
+    subtitle: "Changes outside Vaexil Mod Manager happen only from here, and only when you confirm them.";
+    panel-width: 640px;
     close => { SettingsState.close(); }
 
-    // The sections scroll and Close stays in view, so a short window never
+    // The cards scroll and Close stays in view, so a short window never
     // hides it. The sheet's title, subtitle and Close take about 240px.
     body := ScrollView {
         height: min(inner.preferred-height, max(160px, root.height - 250px));
         inner := VerticalLayout {
             width: body.visible-width;
             padding-right: 10px;
-            spacing: 14px;
-            VerticalLayout {
-                spacing: 8px;
-                FieldLabel { text: "Simple Mod Framework"; }
-                Text {
-                    text: SettingsState.smf-status;
-                    color: Theme.text;
-                    wrap: word-wrap;
-                }
-                if SettingsState.smf-confirming: VerticalLayout {
-                    spacing: 8px;
-                    Text {
-                        text: "This downloads SMF's Release.zip from its GitHub page, checks it against the checksum GitHub gives, and installs it the way SMF's own updater does. Your mods, config.json and SMF's clean copies stay, and a copy of every replaced file is kept. HITMAN and SMF's own Mod Manager must be closed. Deploy afterwards to use it.";
-                        color: Theme.secondary-text;
-                        wrap: word-wrap;
-                    }
-                    ButtonRow {
-                        Button {
-                            text: "Cancel";
-                            accessible-label: "Cancel updating SMF";
-                            clicked => { SettingsState.smf-cancel(); }
-                        }
-                        Button {
-                            text: "Update SMF";
-                            primary: true;
-                            clicked => { SettingsState.smf-confirm(); }
-                        }
-                    }
-                }
-                if !SettingsState.smf-confirming && !SettingsState.smf-busy: HorizontalLayout {
-                    alignment: start;
-                    spacing: 8px;
-                    Button {
-                        text: "Check for updates";
-                        accessible-label: "Check for SMF updates";
-                        clicked => { SettingsState.smf-check(); }
-                    }
-                    if SettingsState.smf-can-update: Button {
-                        text: "Update SMF…";
-                        accessible-label: "Update SMF";
-                        clicked => { SettingsState.smf-update(); }
-                    }
-                }
-                if SettingsState.smf-note != "": Text {
-                    text: SettingsState.smf-note;
-                    font-size: 12px;
-                    color: SettingsState.smf-note-error ? Theme.danger : (SettingsState.smf-busy ? Theme.secondary-text : Theme.ready);
-                    wrap: word-wrap;
-                }
-            }
+            spacing: 12px;
 
-            VerticalLayout {
-                spacing: 6px;
-                FieldLabel { text: "Command line"; }
-                Text {
-                    text: "vmm.exe does what the window does, from a terminal or an AI tool: “vmm status”, “vmm mods”, and for changes “vmm plan” then “vmm apply --yes”. Add --json for output that tools can read.";
-                    color: Theme.text;
-                    wrap: word-wrap;
-                }
-                if SettingsState.cli-exe != "": Text {
-                    text: SettingsState.cli-exe;
-                    font-family: Theme.font-mono;
-                    font-size: 12px;
-                    color: Theme.secondary-text;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: SettingsState.cli-exe == "" ? "vmm.exe isn't beside the app, so it can't be added to PATH. Reinstall Vaexil Mod Manager to get it."
-                        : SettingsState.on-path ? "It is on your PATH, so vmm works in any new terminal."
-                        : "It isn't on your PATH. Until it is, run it by its full path.";
-                    color: Theme.secondary-text;
-                    wrap: word-wrap;
-                }
-            }
-
-            if SettingsState.confirming: VerticalLayout {
-                spacing: 8px;
-                Text {
-                    text: "This adds one folder to the end of your own PATH (the Path value in HKEY_CURRENT_USER\\Environment):";
-                    color: Theme.text;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: SettingsState.cli-folder;
-                    font-family: Theme.font-mono;
-                    font-size: 12px;
-                    color: Theme.text;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: "Nothing else in PATH changes, and the system PATH isn't touched. Terminals opened afterwards find vmm; ones already open don't. You can take it out again here.";
-                    color: Theme.secondary-text;
-                    wrap: word-wrap;
-                }
-                ButtonRow {
-                    Button {
-                        text: "Cancel";
-                        accessible-label: "Cancel adding to PATH";
-                        clicked => { SettingsState.cancel-add(); }
-                    }
-                    Button {
-                        text: "Add to PATH";
-                        primary: true;
-                        clicked => { SettingsState.confirm-add(); }
-                    }
-                }
-            }
-
-            if !SettingsState.confirming && SettingsState.cli-exe != "": HorizontalLayout {
-                alignment: start;
-                if !SettingsState.on-path: Button {
-                    text: "Add the command line to my PATH";
-                    clicked => { SettingsState.add-to-path(); }
-                }
-                if SettingsState.on-path: Button {
-                    text: "Take it out of my PATH";
-                    accessible-label: "Take the command line out of my PATH";
-                    clicked => { SettingsState.remove-from-path(); }
-                }
-            }
-
-            VerticalLayout {
-                spacing: 8px;
-                FieldLabel { text: "Steam's Play button"; }
-                Text {
-                    text: "Make Steam's own Play button start HITMAN through Vaexil Mod Manager. If your mods changed since the last deploy, it asks whether to deploy first or play the build already in the game; otherwise the game just starts.";
-                    color: Theme.text;
-                    wrap: word-wrap;
-                }
+            // Steam's Play button
+            Card {
+                title: "Steam's Play button";
+                description: "Make Steam's own Play button start HITMAN through Vaexil Mod Manager. If your mods changed since the last deploy, it asks whether to deploy first or play the build already in the game; otherwise the game just starts.";
+                badge: SettingsState.steam-problem != "" ? "Unavailable" : SettingsState.steam-connected ? "On" : "Off";
+                tone: SettingsState.steam-problem != "" ? "bad" : SettingsState.steam-connected ? "ok" : "off";
                 Text {
                     text: SettingsState.steam-problem != "" ? SettingsState.steam-problem
-                        : SettingsState.steam-connected ? "On for " + SettingsState.steam-account + ": Steam's Play button starts Vaexil Mod Manager."
-                        : "Off for " + SettingsState.steam-account + ". HITMAN's launch options now: " + (SettingsState.steam-current == "" ? "none" : SettingsState.steam-current);
+                        : SettingsState.steam-connected ? "Steam (" + SettingsState.steam-account + ") starts HITMAN through Vaexil Mod Manager."
+                        : "Steam (" + SettingsState.steam-account + ") starts HITMAN directly. Its launch options now: " + (SettingsState.steam-current == "" ? "none" : SettingsState.steam-current);
                     font-size: 12px;
-                    color: SettingsState.steam-problem != "" ? Theme.danger : Theme.secondary-text;
+                    color: SettingsState.steam-problem != "" ? Theme.danger : Theme.text;
                     wrap: word-wrap;
                 }
-                if SettingsState.steam-confirming: VerticalLayout {
-                    spacing: 8px;
+                if SettingsState.steam-confirming: Confirm {
+                    heading: "Confirm: change HITMAN's launch options in Steam";
                     Text {
-                        text: "This sets HITMAN's launch options in Steam (" + SettingsState.steam-account + ") to:";
-                        color: Theme.text;
-                        wrap: word-wrap;
-                    }
-                    Text {
-                        text: SettingsState.steam-proposed;
-                        font-family: Theme.font-mono;
+                        text: "For " + SettingsState.steam-account + ", HITMAN's launch options become:";
                         font-size: 12px;
                         color: Theme.text;
                         wrap: word-wrap;
                     }
+                    Mono { text: SettingsState.steam-proposed; }
                     Text {
-                        text: "replacing " + (SettingsState.steam-current == "" ? "no launch options" : "\u{201c}" + SettingsState.steam-current + "\u{201d}") + ". A copy of Steam's settings is kept first, nothing else in them changes, and you can put them back here. Steam must be closed.";
+                        text: "This replaces " + (SettingsState.steam-current == "" ? "no launch options" : "\u{201c}" + SettingsState.steam-current + "\u{201d}") + ". A copy of Steam's settings is kept first, nothing else in them changes, and you can put them back here. Steam must be closed.";
+                        font-size: 12px;
                         color: Theme.secondary-text;
                         wrap: word-wrap;
                     }
@@ -272,10 +285,10 @@ export component SettingsSheet inherits Sheet {
                         }
                     }
                 }
-                if !SettingsState.steam-confirming && SettingsState.steam-problem == "": HorizontalLayout {
-                    alignment: start;
+                if !SettingsState.steam-confirming && SettingsState.steam-problem == "": Actions {
                     if !SettingsState.steam-connected: Button {
-                        text: "Use Vaexil Mod Manager for Steam's Play button";
+                        text: "Use Vaexil Mod Manager for Steam's Play button…";
+                        accessible-label: "Use Vaexil Mod Manager for Steam's Play button";
                         clicked => { SettingsState.steam-connect(); }
                     }
                     if SettingsState.steam-connected: Button {
@@ -283,24 +296,79 @@ export component SettingsSheet inherits Sheet {
                         clicked => { SettingsState.steam-disconnect(); }
                     }
                 }
-                if SettingsState.steam-note != "": Text {
+                if SettingsState.steam-note != "": Note {
                     text: SettingsState.steam-note;
-                    font-size: 12px;
-                    color: SettingsState.steam-note-error ? Theme.danger : Theme.ready;
-                    wrap: word-wrap;
+                    error: SettingsState.steam-note-error;
                 }
             }
 
-            VerticalLayout {
-                spacing: 8px;
-                FieldLabel { text: "AI tools"; }
+            // Simple Mod Framework
+            Card {
+                title: "Simple Mod Framework";
+                description: "Vaexil Mod Manager runs the official SMF in the HITMAN folder, and can keep it current the way SMF's own updater does.";
+                badge: SettingsState.smf-busy ? "Working"
+                    : SettingsState.smf-state == "current" ? "Up to date"
+                    : SettingsState.smf-state == "available" ? "Update available"
+                    : SettingsState.smf-state == "held" ? "Update by hand"
+                    : SettingsState.smf-state == "unchecked" ? "Not checked"
+                    : "Unknown version";
+                tone: SettingsState.smf-busy ? "busy"
+                    : SettingsState.smf-state == "current" ? "ok"
+                    : SettingsState.smf-state == "available" || SettingsState.smf-state == "held" ? "warn"
+                    : "off";
                 Text {
-                    text: "“vmm mcp” lets an AI app such as Claude Code, Gemini CLI or Codex CLI read your mods and, if you allow it here, change them when you ask. It runs only while the AI app runs it, and makes no network connection.";
+                    text: SettingsState.smf-status;
+                    font-size: 12px;
                     color: Theme.text;
                     wrap: word-wrap;
                 }
-                HorizontalLayout {
-                    alignment: start;
+                if SettingsState.smf-confirming: Confirm {
+                    heading: "Confirm: update SMF";
+                    Text {
+                        text: "This downloads SMF's Release.zip from its GitHub page, checks it against the checksum GitHub gives, and installs it the way SMF's own updater does. Your mods, config.json and SMF's clean copies stay, and a copy of every replaced file is kept. HITMAN and SMF's own Mod Manager must be closed. Deploy afterwards to use it.";
+                        font-size: 12px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        Button {
+                            text: "Cancel";
+                            accessible-label: "Cancel updating SMF";
+                            clicked => { SettingsState.smf-cancel(); }
+                        }
+                        Button {
+                            text: "Update SMF";
+                            primary: true;
+                            clicked => { SettingsState.smf-confirm(); }
+                        }
+                    }
+                }
+                if !SettingsState.smf-confirming && !SettingsState.smf-busy: Actions {
+                    Button {
+                        text: "Check for updates";
+                        accessible-label: "Check for SMF updates";
+                        clicked => { SettingsState.smf-check(); }
+                    }
+                    if SettingsState.smf-can-update: Button {
+                        text: "Update SMF…";
+                        accessible-label: "Update SMF";
+                        clicked => { SettingsState.smf-update(); }
+                    }
+                }
+                if SettingsState.smf-note != "": Note {
+                    text: SettingsState.smf-note;
+                    error: SettingsState.smf-note-error;
+                    quiet: SettingsState.smf-busy;
+                }
+            }
+
+            // AI tools
+            Card {
+                title: "AI tools";
+                description: "“vmm mcp” lets an AI app such as Claude Code, Gemini CLI or Codex CLI read your mods and, if you allow it here, change them when you ask. It runs only while the AI app runs it, and makes no network connection.";
+                badge: SettingsState.ai-changes ? "Changes allowed" : "Read only";
+                tone: SettingsState.ai-changes ? "warn" : "off";
+                Actions {
                     Switch {
                         text: "Let AI tools make changes";
                         checked: SettingsState.ai-changes;
@@ -312,45 +380,97 @@ export component SettingsSheet inherits Sheet {
                 }
                 Text {
                     text: SettingsState.ai-changes
-                        ? "On. An AI tool changes something only when you have asked for it, after showing you the plan. Each change is recorded with your request in journal.jsonl."
-                        : "Off. AI tools can read your mods and plan changes, but can't apply them.";
+                        ? "An AI tool changes something only when you have asked for it, after showing you the plan. Each change is recorded with your request in journal.jsonl."
+                        : "AI tools can read your mods and plan changes, but can't apply them.";
                     font-size: 12px;
                     color: Theme.secondary-text;
                     wrap: word-wrap;
                 }
-                if SettingsState.ai-note != "": Text {
-                    text: SettingsState.ai-note;
-                    font-size: 12px;
-                    color: Theme.danger;
-                    wrap: word-wrap;
+                if SettingsState.ai-note != "": Note { text: SettingsState.ai-note; error: true; }
+                if SettingsState.cli-exe != "": VerticalLayout {
+                    spacing: 8px;
+                    padding-top: 4px;
+                    Text {
+                        text: "Connect an AI app";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    Text {
+                        text: "Run the line for your app in a terminal. It is that app's own command for adding a server; Vaexil Mod Manager doesn't edit other apps' settings.";
+                        font-size: 12px;
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                    }
+                    CommandLine { app: "Claude Code"; command: SettingsState.claude-command; }
+                    CommandLine { app: "Gemini CLI"; command: SettingsState.gemini-command; }
+                    CommandLine { app: "Codex CLI"; command: SettingsState.codex-command; }
                 }
             }
 
-            if SettingsState.cli-exe != "": VerticalLayout {
-                spacing: 8px;
-                FieldLabel { text: "Connect an AI app"; }
+            // Command line
+            Card {
+                title: "Command line";
+                description: "vmm.exe does what the window does, from a terminal or an AI tool: “vmm status”, “vmm mods”, and for changes “vmm plan” then “vmm apply --yes”. Add --json for output that tools can read.";
+                badge: SettingsState.cli-exe == "" ? "Missing" : SettingsState.on-path ? "On PATH" : "Not on PATH";
+                tone: SettingsState.cli-exe == "" ? "bad" : SettingsState.on-path ? "ok" : "off";
+                if SettingsState.cli-exe != "": Mono { text: SettingsState.cli-exe; }
                 Text {
-                    text: "Run the line for your app in a terminal. It is that app's own command for adding a server; Vaexil Mod Manager doesn't edit other apps' settings.";
+                    text: SettingsState.cli-exe == "" ? "vmm.exe isn't beside the app, so it can't be added to PATH. Reinstall Vaexil Mod Manager to get it."
+                        : SettingsState.on-path ? "It is on your PATH, so vmm works in any new terminal."
+                        : "It isn't on your PATH. Until it is, run it by its full path.";
                     font-size: 12px;
                     color: Theme.secondary-text;
                     wrap: word-wrap;
                 }
-                CommandLine { app: "Claude Code"; command: SettingsState.claude-command; }
-                CommandLine { app: "Gemini CLI"; command: SettingsState.gemini-command; }
-                CommandLine { app: "Codex CLI"; command: SettingsState.codex-command; }
+                if SettingsState.confirming: Confirm {
+                    heading: "Confirm: add the command line to your PATH";
+                    Text {
+                        text: "This adds one folder to the end of your own PATH (the Path value in HKEY_CURRENT_USER\\Environment):";
+                        font-size: 12px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    Mono { text: SettingsState.cli-folder; }
+                    Text {
+                        text: "Nothing else in PATH changes, and the system PATH isn't touched. Terminals opened afterwards find vmm; ones already open don't. You can take it out again here.";
+                        font-size: 12px;
+                        color: Theme.secondary-text;
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        Button {
+                            text: "Cancel";
+                            accessible-label: "Cancel adding to PATH";
+                            clicked => { SettingsState.cancel-add(); }
+                        }
+                        Button {
+                            text: "Add to PATH";
+                            primary: true;
+                            clicked => { SettingsState.confirm-add(); }
+                        }
+                    }
+                }
+                if !SettingsState.confirming && SettingsState.cli-exe != "": Actions {
+                    if !SettingsState.on-path: Button {
+                        text: "Add the command line to my PATH…";
+                        accessible-label: "Add the command line to my PATH";
+                        clicked => { SettingsState.add-to-path(); }
+                    }
+                    if SettingsState.on-path: Button {
+                        text: "Take it out of my PATH";
+                        accessible-label: "Take the command line out of my PATH";
+                        clicked => { SettingsState.remove-from-path(); }
+                    }
+                }
+                if SettingsState.note != "": Note { text: SettingsState.note; error: SettingsState.note-error; }
             }
 
-            VerticalLayout {
-                spacing: 8px;
-                FieldLabel { text: "Diagnostics"; }
-                Text {
-                    text: "Copies everything needed to look into a problem: how the game was found, current problems, the last deploy, recent events and settings, as JSON. Paths in your user folder start with ~.";
-                    font-size: 12px;
-                    color: Theme.secondary-text;
-                    wrap: word-wrap;
-                }
-                HorizontalLayout {
-                    alignment: start;
+            // Diagnostics
+            Card {
+                title: "Diagnostics";
+                description: "Copies everything needed to look into a problem: how the game was found, current problems, the last deploy, recent events and settings, as JSON. Paths in your user folder start with ~.";
+                Actions {
                     spacing: 10px;
                     Button {
                         text: "Copy diagnostics";
@@ -368,7 +488,8 @@ export component SettingsSheet inherits Sheet {
                         vertical-alignment: center;
                     }
                 }
-                // Holds the text only to copy it; never shown.
+                // Holds the text only to copy it; never shown. A zero-width
+                // field doesn't copy, so it stays full width in the card.
                 diag-field := TextInput {
                     visible: false;
                     height: 0px;
@@ -376,13 +497,6 @@ export component SettingsSheet inherits Sheet {
                     read-only: true;
                     accessible-role: none;
                 }
-            }
-
-            if SettingsState.note != "": Text {
-                text: SettingsState.note;
-                font-size: 12px;
-                color: SettingsState.note-error ? Theme.danger : Theme.ready;
-                wrap: word-wrap;
             }
         }
     }

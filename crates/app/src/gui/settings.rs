@@ -63,6 +63,14 @@ fn show_smf(ui: &AppWindow, state: &State) {
             None => format!("Installed: {i}. Not checked yet."),
         },
     };
+    let badge = match (&installed, &s.latest, s.held, s.checked_at_ms) {
+        (None, ..) => "unknown",
+        (Some(_), Some(_), false, _) => "available",
+        (Some(_), Some(_), true, _) => "held",
+        (Some(_), None, _, Some(_)) => "current",
+        (Some(_), None, _, None) => "unchecked",
+    };
+    ss.set_smf_state(badge.into());
     ss.set_smf_status(text.into());
     ss.set_smf_can_update(installed.is_some() && s.latest.is_some() && !s.held);
 }
