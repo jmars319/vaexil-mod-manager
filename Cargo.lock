@@ -4888,7 +4888,7 @@ dependencies = [
 
 [[package]]
 name = "vaexil-mod-manager"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "raw-window-handle",
  "serde_json",
@@ -4909,7 +4909,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vmm-backend-smf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "json5",
@@ -4924,7 +4924,7 @@ dependencies = [
 
 [[package]]
 name = "vmm-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rmcp",
  "schemars",
@@ -4938,7 +4938,7 @@ dependencies = [
 
 [[package]]
 name = "vmm-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "schemars",
  "serde",
@@ -4949,7 +4949,7 @@ dependencies = [
 
 [[package]]
 name = "vmm-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/core", "crates/backend-smf", "crates/engine", "crates/cli", "crates/app"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://github.com/jmars319/vaexil-mod-manager"
@@ -11,9 +11,9 @@ rust-version = "1.92"
 publish = false
 
 [workspace.dependencies]
-vmm-core = { path = "crates/core", version = "0.1.0" }
-vmm-backend-smf = { path = "crates/backend-smf", version = "0.1.0" }
-vmm-engine = { path = "crates/engine", version = "0.1.0" }
+vmm-core = { path = "crates/core", version = "0.2.0" }
+vmm-backend-smf = { path = "crates/backend-smf", version = "0.2.0" }
+vmm-engine = { path = "crates/engine", version = "0.2.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 json5 = "1.3"
