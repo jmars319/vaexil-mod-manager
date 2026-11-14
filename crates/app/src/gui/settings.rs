@@ -3,28 +3,12 @@
 //! "Let AI tools make changes", and each AI app's own command for adding
 //! `vmm mcp` as a server.
 
-use std::path::Path;
 use std::rc::Rc;
 
 use slint::ComponentHandle;
 
 use super::State;
 use crate::{AppWindow, SettingsState, Ui, cli_path};
-
-/// The server's name in the AI apps' settings.
-const SERVER_NAME: &str = "vaexil-mod-manager";
-
-/// Each AI app's own command for adding `vmm mcp` as a server, for the user
-/// to run. Claude Code and Gemini CLI get user scope (every project), not
-/// their default of the current project.
-fn connect_commands(exe: &Path) -> [String; 3] {
-    let exe = exe.display();
-    [
-        format!("claude mcp add --scope user {SERVER_NAME} -- \"{exe}\" mcp"),
-        format!("gemini mcp add --scope user {SERVER_NAME} \"{exe}\" mcp"),
-        format!("codex mcp add {SERVER_NAME} -- \"{exe}\" mcp"),
-    ]
-}
 
 /// Reads where `vmm.exe` is and whether it is on PATH into the sheet.
 /// Steam's Play button as it stands, into the sheet.
@@ -80,11 +64,8 @@ fn show(ui: &AppWindow, state: &State) {
     show_steam(ui, state);
     show_smf(ui, state);
     ss.set_ai_changes(state.engine.ai_changes_allowed());
+    super::ai_apps::show(ui, &state.engine);
     let exe = cli_path::cli_exe();
-    let [claude, gemini, codex] = exe.as_deref().map(connect_commands).unwrap_or_default();
-    ss.set_claude_command(claude.into());
-    ss.set_gemini_command(gemini.into());
-    ss.set_codex_command(codex.into());
     let folder = exe.as_ref().and_then(|e| e.parent()).map(|f| f.to_path_buf());
     ss.set_cli_exe(exe.map(|e| e.display().to_string()).unwrap_or_default().into());
     ss.set_cli_folder(folder.as_ref().map(|f| f.display().to_string()).unwrap_or_default().into());
@@ -235,6 +216,7 @@ pub fn wire_settings(ui: &AppWindow, state: &Rc<State>) {
         }
     }
     wire_smf(ui, state);
+    super::ai_apps::wire(ui);
     {
         let weak = ui.as_weak();
         ss.on_cancel_add(move || {
@@ -258,7 +240,7 @@ type Slot<T> = std::sync::Arc<std::sync::Mutex<Option<T>>>;
 
 /// Runs `work` on a worker thread and hands its result to `done` on the
 /// window's thread, polling every 300 ms; `line` shows progress meanwhile.
-fn in_background<T: Send + 'static>(
+pub(super) fn in_background<T: Send + 'static>(
     ui: &AppWindow,
     work: impl FnOnce(&dyn Fn(String)) -> T + Send + 'static,
     done: impl Fn(&AppWindow, T) + 'static,
@@ -426,18 +408,5 @@ pub fn daily_smf_check(state: &State) {
         std::thread::spawn(move || {
             let _ = vmm_engine::smf_update::check(&data, &installed);
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn connect_commands_quote_the_path_and_use_user_scope() {
-        let [claude, gemini, codex] = connect_commands(Path::new(r"C:\Program Files\VMM\vmm.exe"));
-        assert_eq!(claude, r#"claude mcp add --scope user vaexil-mod-manager -- "C:\Program Files\VMM\vmm.exe" mcp"#);
-        assert_eq!(gemini, r#"gemini mcp add --scope user vaexil-mod-manager "C:\Program Files\VMM\vmm.exe" mcp"#);
-        assert_eq!(codex, r#"codex mcp add vaexil-mod-manager -- "C:\Program Files\VMM\vmm.exe" mcp"#);
     }
 }

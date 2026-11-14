@@ -93,8 +93,13 @@ pub struct Places {
 }
 
 impl Places {
+    /// `VAEXIL_MOD_MANAGER_AI_APPS`, when set, is the only folder looked
+    /// in, so tests and development runs never reach the real AI apps.
     pub fn from_env() -> Places {
         let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+        if let Some(only) = var("VAEXIL_MOD_MANAGER_AI_APPS") {
+            return Places { path: vec![only], ..Places::default() };
+        }
         Places {
             path: std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default(),
             home: var("USERPROFILE"),

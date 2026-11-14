@@ -6,6 +6,7 @@
 //! compatibility passes (see `wire`). Everything it does goes through
 //! `vmm-engine`; this module only turns the engine's answers into the window.
 
+mod ai_apps;
 mod order_view;
 mod report;
 mod settings;
