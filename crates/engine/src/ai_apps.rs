@@ -269,11 +269,12 @@ pub fn disconnect_command(app: AiApp, found: &Found) -> CommandLine {
 }
 
 /// The app's own status command. Claude Code's and Gemini CLI's start the
-/// server and handshake with it; Codex CLI's lists what is configured.
+/// server and handshake with it; Codex CLI's says whether it is configured
+/// and enabled (checked against Codex CLI 0.169.0).
 pub fn check_command(app: AiApp, found: &Found) -> CommandLine {
     let args: &[&str] = match app {
-        AiApp::ClaudeCode => &["mcp", "get", SERVER_NAME],
-        AiApp::GeminiCli | AiApp::CodexCli => &["mcp", "list"],
+        AiApp::ClaudeCode | AiApp::CodexCli => &["mcp", "get", SERVER_NAME],
+        AiApp::GeminiCli => &["mcp", "list"],
     };
     CommandLine { program: found.path.clone(), args: args.iter().map(|s| s.to_string()).collect() }
 }
@@ -310,10 +311,20 @@ fn read_check(app: AiApp, out: &Output) -> Check {
         AiApp::ClaudeCode if !out.success => Check::Failed(text),
         AiApp::ClaudeCode if lower.contains("connected") && !lower.contains("failed") => Check::Connected,
         AiApp::ClaudeCode => Check::Failed(text),
+        // "Error: No MCP server named 'x' found." (Codex CLI 0.169.0).
+        AiApp::CodexCli if lower.contains("no mcp server") => Check::NotConnected,
+        AiApp::CodexCli if !out.success => Check::Failed(text),
+        AiApp::CodexCli if lower.contains("enabled: false") => {
+            Check::Failed("It is in Codex CLI's settings but turned off there.".into())
+        }
+        AiApp::CodexCli => Check::Listed,
         _ if !listed => Check::NotConnected,
+        // Gemini CLI 0.68.0 turns off every MCP server, even user-level ones,
+        // in a folder it doesn't trust: "... (stdio) - Disabled".
+        AiApp::GeminiCli if line.to_lowercase().contains("disabled") => Check::NeedsTrust,
         AiApp::GeminiCli if line.to_lowercase().contains("disconnected") => Check::Failed(line.trim().to_string()),
         AiApp::GeminiCli if line.to_lowercase().contains("connected") => Check::Connected,
-        _ => Check::Listed,
+        AiApp::GeminiCli => Check::Listed,
     }
 }
 
@@ -322,8 +333,12 @@ fn read_check(app: AiApp, out: &Output) -> Check {
 pub enum Check {
     /// The app started the server and it answered.
     Connected,
-    /// The app has it in its settings but doesn't check it (Codex CLI).
+    /// The app has it in its settings, turned on, but doesn't start it to
+    /// check (Codex CLI).
     Listed,
+    /// Gemini CLI has it, but uses MCP servers only in folders the user has
+    /// trusted in Gemini CLI.
+    NeedsTrust,
     /// The app doesn't have it.
     NotConnected,
     /// The app has it, but starting it failed: the app's own words.
@@ -486,6 +501,7 @@ mod tests {
         assert_eq!(connect_command(AiApp::CodexCli, &f, vmm).args[..4], ["mcp", "add", "vaexil-mod-manager", "--"]);
         assert_eq!(disconnect_command(AiApp::CodexCli, &f).args, ["mcp", "remove", "vaexil-mod-manager"]);
         assert_eq!(check_command(AiApp::ClaudeCode, &f).args, ["mcp", "get", "vaexil-mod-manager"]);
+        assert_eq!(check_command(AiApp::CodexCli, &f).args, ["mcp", "get", "vaexil-mod-manager"]);
         assert!(test_command(AiApp::GeminiCli, &f).is_none());
     }
 
@@ -502,11 +518,15 @@ mod tests {
         assert_eq!(read_check(AiApp::GeminiCli, &out(true, gemini)), Check::Connected);
         let gemini_bad = "\u{2717} vaexil-mod-manager: vmm.exe mcp (stdio) - Disconnected\n";
         assert!(matches!(read_check(AiApp::GeminiCli, &out(true, gemini_bad)), Check::Failed(_)));
-        assert_eq!(
-            read_check(AiApp::CodexCli, &out(true, "Name  Command\nvaexil-mod-manager  vmm.exe\n")),
-            Check::Listed
-        );
-        assert_eq!(read_check(AiApp::CodexCli, &out(true, "No MCP servers configured yet.")), Check::NotConnected);
+        let untrusted = "Warning: MCP servers are configured but disabled because this folder is untrusted.\n\n\u{25cb} vaexil-mod-manager: vmm.exe mcp (stdio) - Disabled\n";
+        assert_eq!(read_check(AiApp::GeminiCli, &out(true, untrusted)), Check::NeedsTrust);
+        // Codex CLI 0.169.0's own words.
+        let codex = "vaexil-mod-manager\n  enabled: true\n  transport: stdio\n  command: vmm.exe\n";
+        assert_eq!(read_check(AiApp::CodexCli, &out(true, codex)), Check::Listed);
+        let codex_off = "vaexil-mod-manager\n  enabled: false\n";
+        assert!(matches!(read_check(AiApp::CodexCli, &out(true, codex_off)), Check::Failed(_)));
+        let codex_missing = "Error: No MCP server named 'vaexil-mod-manager' found.";
+        assert_eq!(read_check(AiApp::CodexCli, &out(false, codex_missing)), Check::NotConnected);
     }
 
     #[test]
