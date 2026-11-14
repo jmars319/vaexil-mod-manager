@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "order.mismatch",
     "message": "A new load order must list each mod that is on at that point exactly once: A, B, C. Nothing was changed.",

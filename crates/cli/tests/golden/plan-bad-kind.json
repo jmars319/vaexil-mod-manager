@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "usage.invalid",
     "message": "“loud” isn't a type. Use one of: gameplay, models-textures, sound, dialogue, ui, text, other, or auto.",

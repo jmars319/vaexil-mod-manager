@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "config.changed_meanwhile",
     "message": "<tmp>/game/Simple Mod Framework/config.json has changed since the plan was made. Nothing was changed.",

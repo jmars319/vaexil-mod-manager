@@ -20,7 +20,8 @@ Each line is that app's own command for adding a server, and it changes only tha
 | --- | --- | --- |
 | `list_games` | Every install of the game found. | No |
 | `get_status` | The game, SMF and its version, mods on, whether the game has the current mods, setups, any compatibility pass. | No |
-| `list_mods`, `get_mod` | Mods with their place in the order, type, options (and the value to choose each), load rules and file overrides. | No |
+| `list_mods` | Every mod, short: on or off, place in the order (mods that are on first, in load order), type, how many options it has and how many are chosen, and file overrides. | No |
+| `get_mod` | One mod: authors, load rules and options with the value to choose each. A mod with more than 100 options shows its chosen ones; `optionSearch` finds others, and `optionsLeftOut` says how many weren't shown. | No |
 | `get_load_order` | The order of the mods that are on, the rules it breaks, and an order that keeps them. | No |
 | `list_error_codes` | Every error code, what it means and what to do. | No |
 | `get_logs` | The newest events: every change, who made it (`gui`, `cli` or `mcp:<app>`), and every failure with its code. | No |

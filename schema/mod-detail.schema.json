@@ -11,12 +11,19 @@
     },
     "mod": {
       "$ref": "#/$defs/ModView"
+    },
+    "optionsLeftOut": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0,
+      "description": "Options left out of `mod.options` to keep the answer short: a mod with\nmany options shows the chosen ones, or those matching a search. 0 when\nevery option is shown."
     }
   },
   "required": [
     "schemaVersion",
     "game",
-    "mod"
+    "mod",
+    "optionsLeftOut"
   ],
   "title": "ModDetail",
   "$schema": "https://json-schema.org/draft/2020-12/schema",

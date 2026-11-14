@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "error": {
     "code": "launch.unsupported",
     "message": "Play starts HITMAN through Steam, and this copy is from Folder. Start HITMAN from there.",

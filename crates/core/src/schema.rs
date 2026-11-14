@@ -15,7 +15,7 @@ use crate::error::{ErrorCode, VmmError};
 
 /// The version of these types. Readers should check it and refuse a newer
 /// major version than they know.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// A game install VMM found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -168,7 +168,54 @@ pub struct ModList {
     pub schema_version: u32,
     pub game: GameView,
     /// The mods that are on, in load order, then the mods that are off, by name.
-    pub mods: Vec<ModView>,
+    /// Options are only counted here; `ModDetail` has them in full.
+    pub mods: Vec<ModSummary>,
+}
+
+/// One mod in a list: what an overview needs, short at any size. A mod can
+/// have thousands of options, so the list counts them, and `ModDetail`
+/// (`vmm mod <id>`, MCP `get_mod`) gives the mod in full.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModSummary {
+    pub id: String,
+    pub name: String,
+    pub version: Option<String>,
+    /// What the mod mostly changes. Information only: it never changes what loads.
+    pub kind: ModKind,
+    pub kind_source: KindSource,
+    pub enabled: bool,
+    /// 1-based place in the load order; absent when the mod is off.
+    pub position: Option<usize>,
+    /// A short framework-specific label, such as `RPKG`.
+    pub badge: Option<String>,
+    /// Why the mod's own description can't be read. Such a mod can't be turned on.
+    pub problem: Option<String>,
+    /// How many options the mod has, and how many are chosen.
+    pub option_count: usize,
+    pub chosen_options: usize,
+    /// Enabled mods later in the order that replace a file this one also
+    /// replaces, so their copy is used.
+    pub replaced_by: Vec<String>,
+}
+
+impl From<&ModView> for ModSummary {
+    fn from(m: &ModView) -> Self {
+        ModSummary {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            version: m.version.clone(),
+            kind: m.kind,
+            kind_source: m.kind_source,
+            enabled: m.enabled,
+            position: m.position,
+            badge: m.badge.clone(),
+            problem: m.problem.clone(),
+            option_count: m.options.len(),
+            chosen_options: m.options.iter().filter(|o| o.chosen).count(),
+            replaced_by: m.replaced_by.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -178,6 +225,35 @@ pub struct ModDetail {
     pub game: GameView,
     #[serde(rename = "mod")]
     pub mod_view: ModView,
+    /// Options left out of `mod.options` to keep the answer short: a mod with
+    /// many options shows the chosen ones, or those matching a search. 0 when
+    /// every option is shown.
+    pub options_left_out: usize,
+}
+
+impl ModDetail {
+    /// Keeps the options matching `search` (in their group, label or value,
+    /// ignoring case), or with no search, every option when there are at most
+    /// `max`, else the chosen ones. At most `max` are kept either way.
+    pub fn narrow_options(&mut self, search: Option<&str>, max: usize) {
+        let all = std::mem::take(&mut self.mod_view.options);
+        let total = all.len();
+        let kept: Vec<OptionView> = match search.map(str::to_lowercase).filter(|s| !s.is_empty()) {
+            Some(s) => all
+                .into_iter()
+                .filter(|o| {
+                    o.label.to_lowercase().contains(&s)
+                        || o.value.to_lowercase().contains(&s)
+                        || o.group.as_deref().is_some_and(|g| g.to_lowercase().contains(&s))
+                })
+                .take(max)
+                .collect(),
+            None if total <= max => all,
+            None => all.into_iter().filter(|o| o.chosen).take(max).collect(),
+        };
+        self.options_left_out = total - kept.len();
+        self.mod_view.options = kept;
+    }
 }
 
 /// When the game last got the current mods.
@@ -750,5 +826,54 @@ mod tests {
         codes.sort();
         codes.dedup();
         assert_eq!(codes.len(), ErrorCode::ALL.len(), "codes are unique");
+    }
+
+    #[test]
+    fn a_mod_with_many_options_shows_the_chosen_or_the_matching() {
+        let option = |g: &str, l: &str, chosen: bool| OptionView {
+            value: format!("{g}:{l}"),
+            label: l.into(),
+            group: Some(g.into()),
+            tooltip: None,
+            chosen,
+            needs: vec![],
+        };
+        let mut options: Vec<OptionView> = (0..300).map(|i| option(&format!("Group {i}"), "Off", false)).collect();
+        options.push(option("Weapons", "On", true));
+        let detail = ModDetail {
+            schema_version: SCHEMA_VERSION,
+            game: GameView { id: "g".into(), name: "G".into(), store: "Folder".into(), folder: "f".into() },
+            mod_view: ModView {
+                id: "m".into(),
+                name: "M".into(),
+                version: None,
+                authors: vec![],
+                kind: ModKind::Other,
+                kind_source: KindSource::Files,
+                enabled: true,
+                position: Some(1),
+                badge: None,
+                problem: None,
+                options,
+                load_before: vec![],
+                load_after: vec![],
+                replaced_by: vec![],
+                folder: "f".into(),
+            },
+            options_left_out: 0,
+        };
+        let mut d = detail.clone();
+        d.narrow_options(None, 100);
+        assert_eq!((d.mod_view.options.len(), d.options_left_out), (1, 300), "only the chosen one");
+        let mut d = detail.clone();
+        d.narrow_options(Some("group 12"), 100);
+        assert_eq!(d.mod_view.options.len(), 11, "Group 12 and Group 120 to 129");
+        let mut d = detail.clone();
+        d.narrow_options(Some("off"), 100);
+        assert_eq!((d.mod_view.options.len(), d.options_left_out), (100, 201), "capped");
+        let mut small = detail;
+        small.mod_view.options.truncate(5);
+        small.narrow_options(None, 100);
+        assert_eq!((small.mod_view.options.len(), small.options_left_out), (5, 0), "a small mod shows all");
     }
 }

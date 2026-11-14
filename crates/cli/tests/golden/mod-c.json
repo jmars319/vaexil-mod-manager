@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "game": {
     "id": "hitman-woa",
     "name": "HITMAN World of Assassination",
@@ -31,5 +31,6 @@
     "loadAfter": [],
     "replacedBy": [],
     "folder": "<tmp>/game/Simple Mod Framework/Mods/C"
-  }
+  },
+  "optionsLeftOut": 0
 }

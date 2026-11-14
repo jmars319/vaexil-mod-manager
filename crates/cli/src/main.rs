@@ -688,7 +688,7 @@ fn status_text(s: &schema::StatusReport) -> String {
     t
 }
 
-fn mod_line(m: &schema::ModView) -> String {
+fn mod_line(m: &schema::ModSummary) -> String {
     let place = match m.position {
         Some(p) => format!("on {p:>3}"),
         None => "off    ".into(),
