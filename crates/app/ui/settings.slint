@@ -487,16 +487,15 @@ export component SettingsSheet inherits Sheet {
                         color: Theme.ready;
                         vertical-alignment: center;
                     }
-                    // Holds the text only to copy it; never shown. Last in
-                    // the row, so it adds no gap anywhere that shows.
-                    diag-field := TextInput {
-                        visible: false;
-                        width: 0px;
-                        height: 0px;
-                        text: SettingsState.diagnostics;
-                        read-only: true;
-                        accessible-role: none;
-                    }
+                }
+                // Holds the text only to copy it; never shown. A zero-width
+                // field doesn't copy, so it stays full width in the card.
+                diag-field := TextInput {
+                    visible: false;
+                    height: 0px;
+                    text: SettingsState.diagnostics;
+                    read-only: true;
+                    accessible-role: none;
                 }
             }
         }
